@@ -1,0 +1,308 @@
+{
+  "project": {
+    "name": "Process Insight Modeler",
+    "version": "0.1.0",
+    "start_date": "2025-01-17",
+    "target_date": "2025-03-14",
+    "status": "in_progress",
+    "description": "博士課程研究用の生産プロセス分析アプリケーション"
+  },
+  "phases": [
+    {
+      "id": "phase1",
+      "name": "プロジェクト基盤構築",
+      "status": "not_started",
+      "start_date": "2025-01-17",
+      "end_date": "2025-01-31",
+      "progress_percentage": 0,
+      "tasks": [
+        {
+          "id": "p1_t1",
+          "name": "プロジェクト構造確立",
+          "status": "not_started",
+          "assigned_date": null,
+          "completed_date": null,
+          "estimated_hours": 4,
+          "actual_hours": 0
+        },
+        {
+          "id": "p1_t2",
+          "name": "データモデル定義（Pydantic）",
+          "status": "not_started",
+          "assigned_date": null,
+          "completed_date": null,
+          "estimated_hours": 6,
+          "actual_hours": 0
+        },
+        {
+          "id": "p1_t3",
+          "name": "セッション管理システム",
+          "status": "not_started",
+          "assigned_date": null,
+          "completed_date": null,
+          "estimated_hours": 8,
+          "actual_hours": 0
+        },
+        {
+          "id": "p1_t4",
+          "name": "基本UI実装（ステップ1）",
+          "status": "not_started",
+          "assigned_date": null,
+          "completed_date": null,
+          "estimated_hours": 6,
+          "actual_hours": 0
+        },
+        {
+          "id": "p1_t5",
+          "name": "OpenAI API統合（ステップ2）",
+          "status": "not_started",
+          "assigned_date": null,
+          "completed_date": null,
+          "estimated_hours": 8,
+          "actual_hours": 0
+        },
+        {
+          "id": "p1_t6",
+          "name": "単体テスト作成",
+          "status": "not_started",
+          "assigned_date": null,
+          "completed_date": null,
+          "estimated_hours": 8,
+          "actual_hours": 0
+        }
+      ]
+    },
+    {
+      "id": "phase2",
+      "name": "対話機能実装",
+      "status": "not_started",
+      "start_date": "2025-02-01",
+      "end_date": "2025-02-14",
+      "progress_percentage": 0,
+      "tasks": [
+        {
+          "id": "p2_t1",
+          "name": "Zigzaggingエンジン実装",
+          "status": "not_started",
+          "assigned_date": null,
+          "completed_date": null,
+          "estimated_hours": 12,
+          "actual_hours": 0
+        },
+        {
+          "id": "p2_t2",
+          "name": "チャットUI実装（ステップ3）",
+          "status": "not_started",
+          "assigned_date": null,
+          "completed_date": null,
+          "estimated_hours": 8,
+          "actual_hours": 0
+        },
+        {
+          "id": "p2_t3",
+          "name": "ノード抽出機能",
+          "status": "not_started",
+          "assigned_date": null,
+          "completed_date": null,
+          "estimated_hours": 6,
+          "actual_hours": 0
+        },
+        {
+          "id": "p2_t4",
+          "name": "対話フローテスト",
+          "status": "not_started",
+          "assigned_date": null,
+          "completed_date": null,
+          "estimated_hours": 8,
+          "actual_hours": 0
+        }
+      ]
+    },
+    {
+      "id": "phase3",
+      "name": "評価システム実装",
+      "status": "not_started",
+      "start_date": "2025-02-15",
+      "end_date": "2025-02-28",
+      "progress_percentage": 0,
+      "tasks": [
+        {
+          "id": "p3_t1",
+          "name": "ペア生成機能（ステップ4）",
+          "status": "not_started",
+          "assigned_date": null,
+          "completed_date": null,
+          "estimated_hours": 6,
+          "actual_hours": 0
+        },
+        {
+          "id": "p3_t2",
+          "name": "評価UI実装",
+          "status": "not_started",
+          "assigned_date": null,
+          "completed_date": null,
+          "estimated_hours": 8,
+          "actual_hours": 0
+        },
+        {
+          "id": "p3_t3",
+          "name": "LLM評価統合（ステップ5）",
+          "status": "not_started",
+          "assigned_date": null,
+          "completed_date": null,
+          "estimated_hours": 10,
+          "actual_hours": 0
+        },
+        {
+          "id": "p3_t4",
+          "name": "データ管理・永続化",
+          "status": "not_started",
+          "assigned_date": null,
+          "completed_date": null,
+          "estimated_hours": 6,
+          "actual_hours": 0
+        },
+        {
+          "id": "p3_t5",
+          "name": "パフォーマンス最適化",
+          "status": "not_started",
+          "assigned_date": null,
+          "completed_date": null,
+          "estimated_hours": 8,
+          "actual_hours": 0
+        }
+      ]
+    },
+    {
+      "id": "phase4",
+      "name": "可視化・分析機能",
+      "status": "not_started",
+      "start_date": "2025-03-01",
+      "end_date": "2025-03-14",
+      "progress_percentage": 0,
+      "tasks": [
+        {
+          "id": "p4_t1",
+          "name": "隣接行列生成（ステップ6）",
+          "status": "not_started",
+          "assigned_date": null,
+          "completed_date": null,
+          "estimated_hours": 6,
+          "actual_hours": 0
+        },
+        {
+          "id": "p4_t2",
+          "name": "ヒートマップ可視化",
+          "status": "not_started",
+          "assigned_date": null,
+          "completed_date": null,
+          "estimated_hours": 8,
+          "actual_hours": 0
+        },
+        {
+          "id": "p4_t3",
+          "name": "ネットワーク分析（ステップ7）",
+          "status": "not_started",
+          "assigned_date": null,
+          "completed_date": null,
+          "estimated_hours": 10,
+          "actual_hours": 0
+        },
+        {
+          "id": "p4_t4",
+          "name": "エクスポート機能",
+          "status": "not_started",
+          "assigned_date": null,
+          "completed_date": null,
+          "estimated_hours": 6,
+          "actual_hours": 0
+        },
+        {
+          "id": "p4_t5",
+          "name": "E2Eテスト・最終品質保証",
+          "status": "not_started",
+          "assigned_date": null,
+          "completed_date": null,
+          "estimated_hours": 10,
+          "actual_hours": 0
+        }
+      ]
+    }
+  ],
+  "metrics": {
+    "total_tasks": 20,
+    "completed_tasks": 0,
+    "in_progress_tasks": 0,
+    "not_started_tasks": 20,
+    "total_estimated_hours": 152,
+    "total_actual_hours": 0,
+    "overall_progress_percentage": 0,
+    "test_coverage": 0,
+    "code_quality_score": 0,
+    "pylint_score": 0,
+    "last_updated": "2025-01-17T00:00:00Z"
+  },
+  "milestones": [
+    {
+      "id": "m1",
+      "name": "基盤システム完成",
+      "target_date": "2025-01-31",
+      "status": "pending",
+      "completion_date": null
+    },
+    {
+      "id": "m2",
+      "name": "対話システム完成",
+      "target_date": "2025-02-14",
+      "status": "pending",
+      "completion_date": null
+    },
+    {
+      "id": "m3",
+      "name": "評価システム完成",
+      "target_date": "2025-02-28",
+      "status": "pending",
+      "completion_date": null
+    },
+    {
+      "id": "m4",
+      "name": "完全システム完成",
+      "target_date": "2025-03-14",
+      "status": "pending",
+      "completion_date": null
+    }
+  ],
+  "risks": [
+    {
+      "id": "risk1",
+      "description": "OpenAI API障害",
+      "impact": "high",
+      "probability": "low",
+      "mitigation": "ローカルキャッシュ実装",
+      "status": "monitoring"
+    },
+    {
+      "id": "risk2",
+      "description": "大規模データ処理性能",
+      "impact": "medium",
+      "probability": "medium",
+      "mitigation": "ページネーション実装",
+      "status": "monitoring"
+    }
+  ],
+  "dependencies": {
+    "python_version": "3.11",
+    "main_packages": [
+      "streamlit",
+      "openai",
+      "pandas",
+      "numpy",
+      "networkx",
+      "matplotlib",
+      "seaborn",
+      "pydantic",
+      "pytest",
+      "pytest-cov"
+    ]
+  }
+}

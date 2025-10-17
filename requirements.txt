@@ -1,0 +1,33 @@
+# Process Insight Modeler - Dependencies
+
+# Core Framework
+streamlit>=1.31.0
+
+# AI/ML
+openai>=1.12.0
+
+# Data Processing
+pandas>=2.2.0
+numpy>=1.26.0
+
+# Network Analysis
+networkx>=3.2.0
+
+# Visualization
+matplotlib>=3.8.0
+seaborn>=0.13.0
+
+# Data Validation
+pydantic>=2.6.0
+
+# Development Tools
+pytest>=8.0.0
+pytest-cov>=4.1.0
+black>=24.1.0
+isort>=5.13.0
+mypy>=1.8.0
+pylint>=3.0.0
+
+# Type Stubs
+types-requests>=2.31.0
+pandas-stubs>=2.1.0
