@@ -34,7 +34,7 @@ class Settings:
     EVALUATION_SCALE_VALUES: Final[tuple] = (-9, -3, -1, 0, 1, 3, 9)
 
     OPENAI_MODEL: Final[str] = "gpt-5-2025-08-07"
-    OPENAI_TEMPERATURE: Final[float] = 0.7
+    # OPENAI_TEMPERATURE: GPT-5 does not support custom temperature values (only default 1.0)
     OPENAI_MAX_RETRIES: Final[int] = 3
     OPENAI_TIMEOUT: Final[int] = 60
 

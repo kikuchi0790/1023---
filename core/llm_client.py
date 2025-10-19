@@ -32,15 +32,13 @@ class LLMClient:
     def _call_with_retry(
         self,
         messages: List[Dict[str, str]],
-        temperature: float = settings.OPENAI_TEMPERATURE,
         max_retries: int = settings.OPENAI_MAX_RETRIES,
     ) -> str:
         """
-        リトライ機能付きAPI呼び出し
+        リトライ機能付きAPI呼び出し (GPT-5: temperatureはデフォルト1.0のみサポート)
 
         Args:
             messages: メッセージリスト
-            temperature: 温度パラメータ
             max_retries: 最大リトライ回数
 
         Returns:
@@ -54,7 +52,6 @@ class LLMClient:
                 response = self.client.chat.completions.create(
                     model=settings.OPENAI_MODEL,
                     messages=messages,
-                    temperature=temperature,
                     timeout=settings.OPENAI_TIMEOUT,
                 )
                 return response.choices[0].message.content or ""
@@ -112,7 +109,7 @@ JSON形式の配列で出力してください。"""
             {"role": "user", "content": user_prompt},
         ]
 
-        response_text = self._call_with_retry(messages, temperature=0.3)
+        response_text = self._call_with_retry(messages)
 
         response_text = response_text.strip()
         if response_text.startswith("```json"):
@@ -286,7 +283,7 @@ JSON形式の配列で出力してください。"""
             }
         ]
 
-        response_text = self._call_with_retry(messages, temperature=0.5)
+        response_text = self._call_with_retry(messages)
 
         response_text = response_text.strip()
         if response_text.startswith("```json"):
@@ -382,7 +379,7 @@ JSON形式の配列で出力してください。"""
             },
         ]
 
-        response_text = self._call_with_retry(messages, temperature=0.5)
+        response_text = self._call_with_retry(messages)
 
         response_text = response_text.strip()
         if response_text.startswith("```json"):
@@ -554,7 +551,7 @@ JSON形式の配列で出力してください。"""
             }
         ]
 
-        response_text = self._call_with_retry(messages, temperature=0.4)
+        response_text = self._call_with_retry(messages)
 
         response_text = response_text.strip()
         if response_text.startswith("```json"):
@@ -627,7 +624,7 @@ JSON形式の配列で出力してください。"""
             }
         )
 
-        response_text = self._call_with_retry(messages, temperature=0.3)
+        response_text = self._call_with_retry(messages)
 
         response_text = response_text.strip()
         if response_text.startswith("```json"):
@@ -717,7 +714,7 @@ JSON形式の配列で出力してください。"""
         messages.extend(conversation_for_expert)
         messages.append({"role": "user", "content": user_message})
 
-        response = self._call_with_retry(messages, temperature=0.6)
+        response = self._call_with_retry(messages)
 
         return response
 
@@ -784,7 +781,7 @@ JSON形式の配列で出力してください。"""
         messages = [{"role": "system", "content": system_prompt}]
         messages.extend(conversation_for_facilitator)
 
-        response = self._call_with_retry(messages, temperature=0.7)
+        response = self._call_with_retry(messages)
 
         return response
 
@@ -885,7 +882,7 @@ IDEF0の考え方（Input-Mechanism-Output）でプロセス全体を分析し�
             messages.insert(1, {"role": "assistant", "content": "これまでの会話を踏まえます。"})
             messages.extend(conversation_context[-3:])
 
-        response_text = self._call_with_retry(messages, temperature=0.8)
+        response_text = self._call_with_retry(messages)
         
         response_text = response_text.strip()
         if response_text.startswith("```json"):
@@ -972,7 +969,7 @@ IDEF0の考え方（Input-Mechanism-Output）でプロセス全体を分析し�
             {"role": "user", "content": f"以下の会話から、全カテゴリのIDEF0ノードを抽出してください:\n\n{conversation_text}"}
         ]
 
-        response_text = self._call_with_retry(messages, temperature=0.3)
+        response_text = self._call_with_retry(messages)
         
         response_text = response_text.strip()
         if response_text.startswith("```json"):
@@ -1085,7 +1082,7 @@ Output: {', '.join(existing_idef0.outputs) if existing_idef0.outputs else 'な�
             {"role": "user", "content": f"以下の会話から、IDEF0形式でノードを抽出してください:\n\n{conversation_text}"}
         ]
 
-        response_text = self._call_with_retry(messages, temperature=0.3)
+        response_text = self._call_with_retry(messages)
         
         response_text = response_text.strip()
         if response_text.startswith("```json"):
@@ -1210,7 +1207,7 @@ AIの創造性と多様性を最大限に引き出してください。
             }
         ]
 
-        response_text = self._call_with_retry(messages, temperature=0.9)
+        response_text = self._call_with_retry(messages)
         
         response_text = response_text.strip()
         if response_text.startswith("```json"):
@@ -1326,7 +1323,7 @@ Zigzagging手法により、IDEF0ノードの粒度を段階的に細かくし�
             }
         ]
 
-        response_text = self._call_with_retry(messages, temperature=0.4)
+        response_text = self._call_with_retry(messages)
 
         response_text = response_text.strip()
         if response_text.startswith("```json"):
@@ -1456,7 +1453,7 @@ Zigzagging手法により、IDEF0ノードの粒度を段階的に細かくし�
             }
         ]
 
-        response_text = self._call_with_retry(messages, temperature=0.7)
+        response_text = self._call_with_retry(messages)
         
         response_text = response_text.strip()
         if response_text.startswith("```json"):
@@ -1657,7 +1654,7 @@ AIの創造性と多様性を最大限に引き出してください。
             }
         ]
 
-        response_text = self._call_with_retry(messages, temperature=0.9)
+        response_text = self._call_with_retry(messages)
         
         response_text = response_text.strip()
         if response_text.startswith("```json"):
@@ -1817,7 +1814,7 @@ AIの創造性と多様性を最大限に引き出してください。
             }
         ]
         
-        response_text = self._call_with_retry(messages, temperature=0.7)
+        response_text = self._call_with_retry(messages)
         
         # JSONパース
         response_text = response_text.strip()
@@ -2009,7 +2006,7 @@ IDEF0モデリングとZigzagging手法の専門家として、ノード間の�
         ]
         
         try:
-            response_text = self._call_with_retry(messages, temperature=0.3)
+            response_text = self._call_with_retry(messages)
             
             # JSON抽出
             import re
@@ -2180,7 +2177,7 @@ IDEF0モデリングとZigzagging手法の専門家として、ノード間の�
             ]
             
             try:
-                response_text = self._call_with_retry(messages, temperature=0.2)
+                response_text = self._call_with_retry(messages)
                 
                 # JSON抽出
                 import re
