@@ -32,7 +32,7 @@ class Settings:
     EVALUATION_SCALE_MAX: Final[int] = 9
     EVALUATION_SCALE_VALUES: Final[tuple] = (-9, -7, -5, -3, -1, 0, 1, 3, 5, 7, 9)
 
-    OPENAI_MODEL: Final[str] = "gpt-5-2025-08-07"
+    OPENAI_MODEL: Final[str] = "gpt-5-nano-2025-08-07"
     # OPENAI_TEMPERATURE: GPT-5 does not support custom temperature values (only default 1.0)
     OPENAI_MAX_RETRIES: Final[int] = 3
     OPENAI_TIMEOUT: Final[int] = 60

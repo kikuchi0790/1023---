@@ -1110,6 +1110,39 @@ def tab4_node_evaluation():
             }[phase_idx]
             
             with st.expander(f"📊 {phase_name} ({len(phase_plans)}件)", expanded=(phase_idx == 1)):
+                if st.button(f"🚀 {phase_name}を全て評価", type="primary", key=f"batch_eval_phase_{phase_idx}"):
+                    progress_bar = st.progress(0.0)
+                    status_text = st.empty()
+                    
+                    total = len(phase_plans)
+                    success_count = 0
+                    
+                    for idx, (plan_idx, plan) in enumerate(phase_plans):
+                        status_text.text(f"評価中: {idx + 1}/{total} - {plan['from_category']} → {plan['to_category']}")
+                        
+                        try:
+                            _execute_matrix_evaluation(
+                                plan_idx,
+                                plan,
+                                evaluator,
+                                idef0_nodes,
+                                process_name
+                            )
+                            success_count += 1
+                        except Exception as e:
+                            st.error(f"❌ エラー: {plan['from_category']} → {plan['to_category']}: {str(e)}")
+                        
+                        progress_bar.progress((idx + 1) / total)
+                    
+                    status_text.text("")
+                    progress_bar.empty()
+                    
+                    st.success(f"✅ {phase_name}の評価が完了しました！（{success_count}/{total}件成功）")
+                    st.rerun()
+                
+                st.markdown("---")
+                st.caption("個別評価:")
+                
                 for plan_idx, plan in phase_plans:
                     col_info, col_action = st.columns([3, 1])
                     
