@@ -1548,10 +1548,6 @@ Zigzagging手法により、IDEF0ノードの粒度を段階的に細かくし�
             else:
                 print(f"⚠️ 視点{i+1}の生成に失敗しました（スキップ）")
         
-        # 最終プログレスコールバック
-        if progress_callback:
-            progress_callback(num_perspectives, num_perspectives, "完了")
-        
         # 確率値を正規化
         if perspectives:
             for persp in perspectives:
