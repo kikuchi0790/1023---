@@ -962,7 +962,7 @@ def tab4_node_evaluation():
         return
     
     st.markdown("""
-    ## 🎓 評価ロジック（研究発表用）
+    ## 🎓 評価ロジック
     
     **時系列順カテゴリを活用した3フェーズ段階的評価**
     
@@ -1068,8 +1068,6 @@ def tab4_node_evaluation():
             st.error(f"❌ 評価計画作成エラー: {str(e)}")
             import traceback
             st.code(traceback.format_exc())
-        
-        return
     
     if not st.session_state.evaluation_plans:
         st.info("ℹ️ 評価計画を作成してください。")
