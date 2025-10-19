@@ -2220,3 +2220,234 @@ IDEF0モデリングとZigzagging手法の専門家として、ノード間の�
                 continue
         
         return all_results
+    
+    def evaluate_matrix_with_knowledge(
+        self,
+        from_category: str,
+        to_category: str,
+        from_nodes: List[str],
+        to_nodes: List[str],
+        idef0_from: Dict[str, Any],
+        idef0_to: Dict[str, Any],
+        process_name: str,
+        knowledge: List[Dict[str, Any]],
+        distance: int
+    ) -> List[List[int]]:
+        """
+        ナレッジを活用した行列形式の評価生成
+        
+        Args:
+            from_category: 評価元カテゴリ名
+            to_category: 評価先カテゴリ名
+            from_nodes: 評価元ノードリスト（行）
+            to_nodes: 評価先ノードリスト（列）
+            idef0_from: 評価元カテゴリのIDEF0データ
+            idef0_to: 評価先カテゴリのIDEF0データ
+            process_name: プロセス名
+            knowledge: 参考評価リスト（前フェーズの非ゼロ評価）
+            distance: カテゴリ間距離（0=同一、1=隣接、2+=遠距離）
+        
+        Returns:
+            評価行列（2次元リスト）
+            matrix[i][j] = from_nodes[i] → to_nodes[j] のスコア
+        """
+        n = len(from_nodes)
+        m = len(to_nodes)
+        
+        if distance == 0:
+            phase_name = "同一カテゴリ内評価"
+            phase_desc = "内部依存関係の評価"
+            constraint_desc = "対角線成分（自己影響）は必ず0"
+        elif distance == 1:
+            phase_name = "隣接カテゴリ間評価"
+            phase_desc = f"カテゴリ '{from_category}' → '{to_category}' の影響"
+            constraint_desc = "前工程の成果物が次工程に与える影響を評価"
+        else:
+            phase_name = "遠距離カテゴリ間評価"
+            phase_desc = f"カテゴリ '{from_category}' → '{to_category}' の間接的影響"
+            constraint_desc = "中間パスを経由する論理的な依存関係を評価"
+        
+        knowledge_text = self._format_knowledge_for_prompt(knowledge)
+        
+        system_prompt = f"""あなたは生産プロセス分析に20年以上従事するベテランコンサルタントです。
+IDEF0モデリングとZigzagging手法の専門家として、ノード間影響を行列形式で評価してください。
+
+# 評価対象プロセス
+プロセス名: {process_name}
+
+# 評価フェーズ
+{phase_name}: {phase_desc}
+
+## カテゴリ '{from_category}' のIDEF0構造
+機能: {idef0_from.get('function', '')}
+
+Outputs（性能・成果物）:
+{chr(10).join(f'- {o}' for o in idef0_from.get('outputs', []))}
+
+Mechanisms（手段・道具）:
+{chr(10).join(f'- {m}' for m in idef0_from.get('mechanisms', []))}
+
+Inputs（材料・情報）:
+{chr(10).join(f'- {i}' for i in idef0_from.get('inputs', []))}
+
+## カテゴリ '{to_category}' のIDEF0構造
+機能: {idef0_to.get('function', '')}
+
+Outputs（性能・成果物）:
+{chr(10).join(f'- {o}' for o in idef0_to.get('outputs', []))}
+
+Mechanisms（手段・道具）:
+{chr(10).join(f'- {m}' for m in idef0_to.get('mechanisms', []))}
+
+Inputs（材料・情報）:
+{chr(10).join(f'- {i}' for i in idef0_to.get('inputs', []))}
+
+# 参考評価（ナレッジ）
+{knowledge_text}
+
+# Zigzagging評価原則（疎で階層的な行列の生成）
+
+## 評価の問いかけ（How推論）
+
+各ペアについて、以下の問いかけで論理的な依存関係を判断してください：
+
+**問い**: 「この要素（from）を改善すると、あの要素（to）は【どのように(How)】変化するか？」
+
+## スコアリング基準
+
+### 許可される絶対値
+**±0, ±1, ±3, ±5, ±7, ±9 のみ**
+
+絶対値の意味：
+- **9**: 決定的な因果関係（この要素なしでは成立しない）
+- **7**: 非常に強い因果関係（主要な影響要因）
+- **5**: 顕著な因果関係（品質や効率に明確な差）
+- **3**: 中程度の因果関係（改善効果あり）
+- **1**: 軽微な因果関係（影響は小さい）
+- **0**: 論理的な因果関係なし
+
+符号の意味：
+- **正（+）**: 改善方向の影響（品質向上、効率化など）
+- **負（-）**: トレードオフ関係（一方を改善すると他方が悪化）
+
+### ❌ How関係が不明確・間接的 → 0評価
+- 論理的な因果関係が説明できない
+- 他の要因を経由する間接的な影響のみ
+
+## 疎行列の厳守（文献の原理）
+
+**重要**: 設計の論理的依存関係（親子関係）に沿った、**直接的で強い影響のみ**を抽出してください。
+
+- 間接的な関係や弱い相関は0としてください
+- 「疎で階層的」な構造を維持してください
+- 総当たり的な評価ではなく、論理的な依存関係に基づく評価を行ってください
+
+## 制約条件
+{constraint_desc}
+
+# タスク
+{n}個の評価元ノード（行）と{m}個の評価先ノード（列）について、
+{n}×{m}の評価行列を生成してください。
+
+行列の各成分[i][j]は、from_nodes[i] → to_nodes[j] の影響スコアです。
+"""
+
+        row_list = "\n".join(f"{i+1}. {node}" for i, node in enumerate(from_nodes))
+        col_list = "\n".join(f"{i+1}. {node}" for i, node in enumerate(to_nodes))
+        
+        user_prompt = f"""# 評価元ノード（行方向、{n}個）
+{row_list}
+
+# 評価先ノード（列方向、{m}個）
+{col_list}
+
+# 出力形式（必ずJSON形式で）
+
+{{
+  "matrix": [
+    [row1_col1, row1_col2, ..., row1_col{m}],
+    [row2_col1, row2_col2, ..., row2_col{m}],
+    ...
+    [row{n}_col1, row{n}_col2, ..., row{n}_col{m}]
+  ]
+}}
+
+# 重要な指示
+1. 行列は{n}×{m}（{n}行{m}列）の2次元配列です
+2. 各成分は **±0, ±1, ±3, ±5, ±7, ±9 のいずれか**
+3. 疎行列の原則: 強い影響がない場合はscore=0
+4. ナレッジ（参考評価）と相対的に整合性を保ってください
+5. 対角線成分（i==j）は必ず0（自己影響なし）
+"""
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        
+        try:
+            response_text = self._call_with_retry(messages)
+            
+            import re
+            json_match = re.search(r'\{[\s\S]*"matrix"[\s\S]*\}', response_text)
+            if json_match:
+                response_json = json.loads(json_match.group(0))
+            else:
+                response_json = json.loads(response_text)
+            
+            matrix = response_json.get("matrix", [])
+            
+            if len(matrix) != n:
+                print(f"⚠️ 行列の行数が不正: 期待{n}、実際{len(matrix)}")
+                return [[0] * m for _ in range(n)]
+            
+            for i, row in enumerate(matrix):
+                if len(row) != m:
+                    print(f"⚠️ 行列の列数が不正（行{i+1}）: 期待{m}、実際{len(row)}")
+                    return [[0] * m for _ in range(n)]
+            
+            for i in range(n):
+                for j in range(m):
+                    score = int(matrix[i][j])
+                    abs_score = abs(score)
+                    
+                    if abs_score not in [0, 1, 3, 5, 7, 9]:
+                        print(f"⚠️ 不正なスコア値[{i}][{j}]: {score} → 0に補正")
+                        matrix[i][j] = 0
+                    
+                    if distance == 0 and i == j:
+                        if score != 0:
+                            print(f"⚠️ 対角線成分が非ゼロ[{i}][{j}]: {score} → 0に補正")
+                            matrix[i][j] = 0
+            
+            return matrix
+        
+        except json.JSONDecodeError as e:
+            print(f"⚠️ JSONパースエラー: {str(e)}")
+            return [[0] * m for _ in range(n)]
+        except Exception as e:
+            print(f"⚠️ LLM評価エラー: {str(e)}")
+            return [[0] * m for _ in range(n)]
+    
+    def _format_knowledge_for_prompt(self, knowledge: List[Dict[str, Any]]) -> str:
+        """
+        ナレッジをLLMプロンプト用にフォーマット
+        
+        Args:
+            knowledge: ナレッジリスト
+        
+        Returns:
+            フォーマット済み文字列
+        """
+        if not knowledge:
+            return "参考評価なし（初回評価）"
+        
+        lines = []
+        for i, item in enumerate(knowledge, 1):
+            sign = "+" if item["score"] > 0 else ""
+            lines.append(
+                f"{i}. {item['from_node']} → {item['to_node']}: {sign}{item['score']} "
+                f"（{item.get('source_category', '不明')}内）"
+            )
+        
+        return "\n".join(lines)

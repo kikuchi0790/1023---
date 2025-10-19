@@ -940,19 +940,12 @@ def tab3_node_definition():
             st.info("次のタブ「ノード影響評価」に進んでください")
 
 
+
+
 def tab4_node_evaluation():
-    """タブ4: ノード影響評価（論理ルールベース + LLMバッチ評価）"""
-    from utils.idef0_classifier import (
-        generate_zigzagging_pairs,
-        get_phase_statistics
-    )
-    from utils.evaluation_filter import (
-        filter_pairs_by_logic,
-        get_batch_summary,
-        apply_default_scores
-    )
+    """タブ4: ノード影響評価（機能カテゴリベース行列評価）"""
     
-    st.header("⚖️ ステップ4: ノード間影響評価（論理ルールベース + LLMバッチ評価）")
+    st.header("⚖️ ステップ4: ノード間影響評価（機能カテゴリベース行列評価）")
     
     nodes = SessionManager.get_nodes()
     idef0_nodes = SessionManager.get_all_idef0_nodes()
@@ -968,252 +961,180 @@ def tab4_node_evaluation():
         return
     
     st.markdown("""
-    **論理ルールベース評価システム**
+    ## 🎓 評価ロジック（研究発表用）
     
-    IDEF0構造とZigzagging手法に基づき、効率的かつ一貫性のある評価を実現します。
+    **時系列順カテゴリを活用した3フェーズ段階的評価**
     
-    ### 評価戦略
+    ### フェーズ1: 同一カテゴリ内評価（距離0）
+    - **目的**: 各カテゴリ内部のn×n行列を評価
+    - **特徴**: ナレッジなし（初回評価）、対角線=0
+    - **評価対象**: 内部依存関係のみ
     
-    1. **論理的フィルタリング**: カテゴリ間距離と評価フェーズに基づき、評価の必要性を自動判定
-    2. **LLMバッチ評価**: 同一カテゴリ内のペアをまとめて評価（効率化 + 全体把握）
-    3. **疎行列の厳守**: 直接的で強い影響のみを非ゼロとし、間接的影響は0
+    ### フェーズ2: 隣接カテゴリ間評価（距離1）
+    - **目的**: カテゴリA→Bのn×m行列を評価
+    - **特徴**: フェーズ1の非ゼロ評価をナレッジとして活用
+    - **評価対象**: 前工程の成果物が次工程に与える影響
     
-    評価スケール: **-9（強い負）** ～ **0（無関係）** ～ **+9（強い正）**
+    ### フェーズ3: 遠距離評価（距離2+、オプション）
+    - **目的**: カテゴリA→Cのn×m行列を評価
+    - **特徴**: A→B→Cの中間パスナレッジを活用
+    - **評価対象**: 推移的影響の論理的評価
+    
+    **評価スケール**: ±0, ±1, ±3, ±5, ±7, ±9（絶対値のみ制限）
+    
+    **トークン削減効果**: 行列形式により60-80%削減
     """)
     
-    # セッションステート初期化
-    if "evaluation_pairs" not in st.session_state:
-        st.session_state.evaluation_pairs = []
-    if "filtered_results" not in st.session_state:
-        st.session_state.filtered_results = None
-    if "batch_evaluation_done" not in st.session_state:
-        st.session_state.batch_evaluation_done = False
+    if "matrix_evaluator" not in st.session_state:
+        st.session_state.matrix_evaluator = None
+    if "evaluation_plans" not in st.session_state:
+        st.session_state.evaluation_plans = []
+    if "current_phase" not in st.session_state:
+        st.session_state.current_phase = 0
+    if "completed_plans" not in st.session_state:
+        st.session_state.completed_plans = set()
     
-    # ステップ1: 評価ペア生成とフィルタリング
-    if not st.session_state.evaluation_pairs:
-        st.subheader("📋 ステップ1: 評価ペア生成と論理フィルタリング")
-        
-        st.markdown(f"""
-        **現在のノード数**: {len(nodes)}個
-        **カテゴリ数**: {len(categories)}個
-        
-        論理ルールに基づき、評価が必要なペアのみを抽出します。
-        """)
-        
-        if st.button("🔄 評価ペア生成 + フィルタリング実行", type="primary", key="generate_pairs_btn"):
-            try:
-                # 全ペア生成
-                all_pairs = generate_zigzagging_pairs(nodes, idef0_nodes)
-                st.session_state.evaluation_pairs = all_pairs
-                
-                # 論理フィルタリング実行
-                filtered = filter_pairs_by_logic(all_pairs, idef0_nodes, categories)
-                st.session_state.filtered_results = filtered
-                
-                stats = filtered["statistics"]
-                
-                st.success(f"✅ 全{stats['total_pairs']}件のペアを生成し、論理フィルタリングを完了しました")
-                
-                st.markdown("### 📊 フィルタリング結果")
-                
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("必須評価（同一カテゴリ）", stats["must_evaluate"], 
-                             help="同一カテゴリ内のペア - LLMバッチ評価必須")
-                with col2:
-                    st.metric("推奨評価（隣接カテゴリ）", stats["should_evaluate"],
-                             help="隣接カテゴリ間のペア - 評価推奨")
-                with col3:
-                    st.metric("デフォルト0", stats["default_zero"],
-                             help="論理的に影響なしと判定 - 自動的に0")
-                
-                reduction = stats.get("reduction_rate", 0)
-                st.info(f"💡 評価作業量を **{reduction:.1f}%** 削減しました")
-                st.info("💡 次は「ステップ2: LLMバッチ評価」に進んでください。")
-                
-            except Exception as e:
-                st.error(f"❌ 評価ペア生成エラー: {str(e)}")
-                import traceback
-                st.code(traceback.format_exc())
-        
-        return
+    st.markdown("---")
+    st.subheader("📋 ステップ1: 評価計画の作成")
     
-    # ステップ2: LLMバッチ評価実行
-    if not st.session_state.batch_evaluation_done:
-        filtered = st.session_state.filtered_results
-        if not filtered:
-            st.error("⚠️ フィルタリング結果が見つかりません。最初からやり直してください。")
-            return
-        
-        st.markdown("---")
-        st.subheader("🤖 ステップ2: LLMバッチ評価実行")
-        
-        stats = filtered["statistics"]
-        must_eval = filtered["must_evaluate"]
-        should_eval = filtered["should_evaluate"]
-        default_zero = filtered["default_zero"]
-        category_batches = filtered["category_batches"]
-        
-        batch_summary = get_batch_summary(category_batches)
-        active_batches = [b for b in batch_summary if b["pair_count"] > 0]
-        
-        st.markdown(f"""
-        **必須評価ペア**: {stats["must_evaluate"]}件
-        **カテゴリバッチ数**: {len(active_batches)}個
-        
-        各カテゴリのIDEF0構造を把握しながら、同一カテゴリ内のペアをまとめて評価します。
-        """)
-        
-        # カテゴリバッチサマリー表示
-        if active_batches:
-            with st.expander("📋 カテゴリ別ペア数", expanded=False):
-                for batch in active_batches:
-                    st.markdown(f"**{batch['category']}**: {batch['pair_count']}ペア")
-        
-        if st.button("🚀 LLMバッチ評価を開始", type="primary", key="start_batch_eval"):
-            try:
-                llm_client = LLMClient()
-                all_results = []
-                
-                # デフォルト0のペアを自動追加
-                default_results = apply_default_scores(default_zero)
-                all_results.extend(default_results)
-                
-                # プログレスバー
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
-                total_batches = len(active_batches)
-                
-                for batch_idx, batch in enumerate(active_batches):
-                    category = batch["category"]
-                    pair_count = batch["pair_count"]
-                    
-                    status_text.text(f"カテゴリ '{category}' を評価中... ({batch_idx + 1}/{total_batches})")
-                    
-                    # このカテゴリのペアとIDEF0データを取得
-                    category_pairs = category_batches[category]
-                    idef0_data = idef0_nodes.get(category, {})
-                    
-                    # LLMバッチ評価実行
-                    with st.spinner(f"🤖 LLMが{pair_count}ペアを評価中..."):
-                        batch_results = llm_client.evaluate_category_batch(
-                            category=category,
-                            idef0_data=idef0_data,
-                            pairs=category_pairs,
-                            process_name=process_name
-                        )
-                    
-                    all_results.extend(batch_results)
-                    
-                    # プログレス更新
-                    progress = (batch_idx + 1) / total_batches
-                    progress_bar.progress(progress)
-                
-                # 全評価結果をセッションに保存
-                for result in all_results:
-                    SessionManager.add_evaluation(
-                        from_node=result["from_node"],
-                        to_node=result["to_node"],
-                        score=result["score"],
-                        reason=result["reason"]
-                    )
-                
-                st.session_state.batch_evaluation_done = True
-                
-                status_text.text("")
-                progress_bar.empty()
-                
-                st.success(f"✅ 全{len(all_results)}件の評価が完了しました！")
-                st.info("💡 下の「ステップ3: 評価結果確認」で詳細を確認し、ステップ5に進んでください。")
-                
-            except Exception as e:
-                st.error(f"❌ バッチ評価エラー: {str(e)}")
-                import traceback
-                st.code(traceback.format_exc())
-        
-        # ステップ2.5: Zigzagging推論（オプション機能）
-        st.markdown("---")
-        st.subheader("🔍 ステップ2.5: Zigzagging推論（オプション）")
-        
-        st.markdown("""
-        **論理ルールベースで「デフォルト0」と判定されたペアの中から、Zigzagging思考プロセスで論理的な依存関係を探索します。**
-        
-        - 離れた工程間でも、**How関係（どのように貢献するか）**が明確なペアを発見
-        - 「疎で階層的」な構造は維持（間接的な関係は除外）
-        - 処理時間: 数分～10分程度（ペア数に依存）
-        """)
-        
-        default_zero = filtered.get("default_zero", [])
-        
-        st.info(f"📊 デフォルト0と判定されたペア数: {len(default_zero)}件")
-        
-        enable_zigzagging = st.checkbox(
-            "🔬 Zigzagging推論を有効化する（オプション機能）",
-            value=False,
-            help="離れた工程間の論理的な依存関係を探索します。処理時間がかかりますが、精度が向上します。"
+    st.markdown(f"""
+    **現在のノード数**: {len(nodes)}個
+    **カテゴリ数**: {len(categories)}個
+    **カテゴリ**: {', '.join(categories)}
+    """)
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        max_distance = st.selectbox(
+            "評価する最大カテゴリ間距離",
+            options=[0, 1, 2],
+            index=1,
+            help="0=同一カテゴリのみ、1=隣接まで（推奨）、2=遠距離を含む"
         )
-        
-        if enable_zigzagging:
-            if st.button("🚀 Zigzagging推論を実行", type="secondary", key="start_zigzag"):
-                try:
-                    llm_client = LLMClient()
-                    
-                    st.info(f"🔍 {len(default_zero)}件のペアをZigzagging推論で分析中...")
-                    
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-                    
-                    status_text.text("Zigzagging推論実行中...")
-                    
-                    with st.spinner("🤖 LLMがHow関係を推論中..."):
-                        zigzag_results = llm_client.zigzagging_inference_for_distant_pairs(
-                            distant_pairs=default_zero,
-                            idef0_nodes=idef0_nodes,
-                            process_name=process_name,
-                            max_pairs_per_batch=30
-                        )
-                    
-                    progress_bar.progress(1.0)
-                    
-                    # 見つかった関係を既存の評価に追加
-                    if zigzag_results:
-                        for result in zigzag_results:
-                            SessionManager.add_evaluation(
-                                from_node=result["from_node"],
-                                to_node=result["to_node"],
-                                score=result["score"],
-                                reason=result.get("reason", "")  # 空文字列がデフォルト
-                            )
-                        
-                        status_text.text("")
-                        progress_bar.empty()
-                        
-                        st.success(f"✅ Zigzagging推論完了！{len(zigzag_results)}件の論理的な依存関係を発見しました")
-                        
-                        # 発見した関係を表示
-                        with st.expander("🔎 発見された論理的依存関係", expanded=True):
-                            for result in zigzag_results[:10]:  # 最初の10件
-                                score = result["score"]
-                                score_color = "green" if score > 0 else "red"
-                                st.markdown(f"**{result['from_node']}** → **{result['to_node']}**: :{score_color}[{score:+d}]")
-                                st.caption(result["reason"])
-                                st.markdown("---")
-                        
-                        st.info("💡 新たに発見された依存関係が評価に反映されました。")
-                    else:
-                        status_text.text("")
-                        progress_bar.empty()
-                        st.info("ℹ️ 新たな論理的依存関係は発見されませんでした。現在の疎行列が維持されます。")
-                
-                except Exception as e:
-                    st.error(f"❌ Zigzagging推論エラー: {str(e)}")
-                    import traceback
-                    st.code(traceback.format_exc())
+    with col2:
+        enable_distant = st.checkbox(
+            "遠距離評価を有効化（距離2+）",
+            value=False,
+            help="フェーズ3を実行（LLM呼び出しが大幅に増加）",
+            disabled=(max_distance < 2)
+        )
+    
+    if st.button("🔄 評価計画を作成", type="primary", key="create_plan_btn"):
+        try:
+            evaluator = MatrixEvaluator(categories, idef0_nodes, nodes)
+            plans = evaluator.plan_evaluation_phases(
+                max_distance=max_distance,
+                enable_distant=enable_distant
+            )
+            
+            st.session_state.matrix_evaluator = evaluator
+            st.session_state.evaluation_plans = plans
+            st.session_state.current_phase = 0
+            st.session_state.completed_plans = set()
+            
+            SessionManager.get_project_data()["evaluations"] = []
+            
+            summary = evaluator.get_phase_summary(plans)
+            
+            st.success(f"✅ 評価計画を作成しました（全{summary['total_plans']}件）")
+            
+            col_s1, col_s2, col_s3 = st.columns(3)
+            with col_s1:
+                phase1 = summary["phase_1_same"]
+                st.metric(
+                    "フェーズ1（同一カテゴリ）",
+                    f"{phase1['count']}件",
+                    delta=f"{phase1['total_pairs']}ペア"
+                )
+            with col_s2:
+                phase2 = summary["phase_2_adjacent"]
+                st.metric(
+                    "フェーズ2（隣接カテゴリ）",
+                    f"{phase2['count']}件",
+                    delta=f"{phase2['total_pairs']}ペア"
+                )
+            with col_s3:
+                phase3 = summary["phase_3_distant"]
+                st.metric(
+                    "フェーズ3（遠距離）",
+                    f"{phase3['count']}件",
+                    delta=f"{phase3['total_pairs']}ペア"
+                )
+            
+            st.info("💡 次は「ステップ2: 段階的評価実行」に進んでください。")
+            
+        except Exception as e:
+            st.error(f"❌ 評価計画作成エラー: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc())
         
         return
     
-    # ステップ3: 評価結果確認
+    if not st.session_state.evaluation_plans:
+        st.info("ℹ️ 評価計画を作成してください。")
+        return
+    
+    st.markdown("---")
+    st.subheader("🚀 ステップ2: 段階的評価実行")
+    
+    plans = st.session_state.evaluation_plans
+    evaluator = st.session_state.matrix_evaluator
+    completed = st.session_state.completed_plans
+    
+    remaining_plans = [p for i, p in enumerate(plans) if i not in completed]
+    
+    if not remaining_plans:
+        st.success("✅ 全ての評価が完了しました！")
+        st.info("👉 下の「ステップ3: 評価結果確認」で詳細を確認できます。")
+    else:
+        st.markdown(f"""
+        **進捗**: {len(completed)} / {len(plans)} 完了
+        
+        次に評価する行列を選択してください。
+        """)
+        
+        phase_groups = {}
+        for i, plan in enumerate(plans):
+            if i in completed:
+                continue
+            phase_idx = plan["phase_index"]
+            if phase_idx not in phase_groups:
+                phase_groups[phase_idx] = []
+            phase_groups[phase_idx].append((i, plan))
+        
+        for phase_idx in sorted(phase_groups.keys()):
+            phase_plans = phase_groups[phase_idx]
+            phase_name = {
+                1: "フェーズ1: 同一カテゴリ内",
+                2: "フェーズ2: 隣接カテゴリ間",
+                3: "フェーズ3: 遠距離"
+            }[phase_idx]
+            
+            with st.expander(f"📊 {phase_name} ({len(phase_plans)}件)", expanded=(phase_idx == 1)):
+                for plan_idx, plan in phase_plans:
+                    col_info, col_action = st.columns([3, 1])
+                    
+                    with col_info:
+                        n, m = plan["matrix_size"]
+                        total_pairs = n * (n - 1) if plan["distance"] == 0 else n * m
+                        
+                        st.markdown(f"""
+                        **{plan['from_category']} → {plan['to_category']}**  
+                        行列サイズ: {n}×{m} ({total_pairs}ペア)  
+                        カテゴリ間距離: {plan['distance']}
+                        """)
+                    
+                    with col_action:
+                        if st.button("評価", key=f"eval_plan_{plan_idx}"):
+                            _execute_matrix_evaluation(
+                                plan_idx,
+                                plan,
+                                evaluator,
+                                idef0_nodes,
+                                process_name
+                            )
+                            st.rerun()
+    
     st.markdown("---")
     st.subheader("✅ ステップ3: 評価結果確認")
     
@@ -1225,30 +1146,34 @@ def tab4_node_evaluation():
     
     st.success(f"🎉 全{len(evaluations)}件の評価が完了しました！")
     
-    # 非ゼロのペアのみ抽出
-    import pandas as pd
-    
     non_zero_evals = [e for e in evaluations if e.get("score", 0) != 0]
     
-    st.metric("非ゼロ評価ペア", f"{len(non_zero_evals)} / {len(evaluations)}")
-    st.caption(f"疎行列率: {100 * (1 - len(non_zero_evals) / len(evaluations)):.1f}% がゼロ")
+    col_m1, col_m2 = st.columns(2)
+    with col_m1:
+        st.metric("非ゼロ評価ペア", f"{len(non_zero_evals)} / {len(evaluations)}")
+    with col_m2:
+        sparsity = 100 * (1 - len(non_zero_evals) / len(evaluations)) if evaluations else 0
+        st.metric("疎行列率", f"{sparsity:.1f}%")
     
-    # 高スコアペアの表示
     if non_zero_evals:
         with st.expander("🔥 高スコアペア（|score| ≥ 5）", expanded=True):
             high_score_evals = [e for e in non_zero_evals if abs(e.get("score", 0)) >= 5]
             
             if high_score_evals:
-                # スコアでソート
-                high_score_evals_sorted = sorted(high_score_evals, key=lambda x: abs(x.get("score", 0)), reverse=True)
+                high_score_evals_sorted = sorted(
+                    high_score_evals,
+                    key=lambda x: abs(x.get("score", 0)),
+                    reverse=True
+                )
                 
-                for eval_item in high_score_evals_sorted[:20]:  # 上位20件
+                for eval_item in high_score_evals_sorted[:20]:
                     score = eval_item.get("score", 0)
                     score_color = "green" if score > 0 else "red"
                     
-                    st.markdown(f"**{eval_item['from_node']}** → **{eval_item['to_node']}**: :{score_color}[{score:+d}]")
-                    st.caption(eval_item.get("reason", ""))
-                    st.markdown("---")
+                    st.markdown(
+                        f"**{eval_item['from_node']}** → **{eval_item['to_node']}**: "
+                        f":{score_color}[{score:+d}]"
+                    )
             else:
                 st.info("スコア絶対値5以上のペアはありません。")
     
@@ -1259,21 +1184,95 @@ def tab4_node_evaluation():
     st.markdown("---")
     st.subheader("🗑️ リセット")
     
-    col_reset1, col_reset2 = st.columns(2)
-    with col_reset1:
-        if st.button("🔄 評価ペアをリセット", key="reset_pairs_btn"):
-            st.session_state.evaluation_pairs = []
-            st.session_state.filtered_results = None
-            st.session_state.batch_evaluation_done = False
-            st.info("🔄 評価ペアをリセットしました。「ステップ1」から再実行してください。")
-    with col_reset2:
-        if st.button("🗑️ 評価結果をクリア", key="clear_evals_btn"):
-            if "evaluations" in st.session_state:
-                st.session_state.evaluations = {}
-            st.session_state.batch_evaluation_done = False
-            st.info("🗑️ 評価結果をクリアしました。")
+    if st.button("🔄 評価計画をリセット", key="reset_plan_btn"):
+        st.session_state.matrix_evaluator = None
+        st.session_state.evaluation_plans = []
+        st.session_state.current_phase = 0
+        st.session_state.completed_plans = set()
+        SessionManager.get_project_data()["evaluations"] = []
+        st.info("🔄 評価計画をリセットしました。「ステップ1」から再実行してください。")
+        st.rerun()
 
 
+def _execute_matrix_evaluation(
+    plan_idx: int,
+    plan: dict,
+    evaluator: MatrixEvaluator,
+    idef0_nodes: dict,
+    process_name: str
+):
+    """
+    行列評価を実行
+    
+    Args:
+        plan_idx: 評価計画のインデックス
+        plan: 評価計画
+        evaluator: MatrixEvaluatorインスタンス
+        idef0_nodes: IDEF0ノードデータ
+        process_name: プロセス名
+    """
+    try:
+        from_category = plan["from_category"]
+        to_category = plan["to_category"]
+        from_nodes = plan["from_nodes"]
+        to_nodes = plan["to_nodes"]
+        distance = plan["distance"]
+        
+        idef0_from = idef0_nodes.get(from_category, {})
+        idef0_to = idef0_nodes.get(to_category, {})
+        
+        knowledge = evaluator.extract_knowledge_for_plan(plan, top_k=10)
+        
+        with st.spinner(f"🤖 LLMが{plan['matrix_size'][0]}×{plan['matrix_size'][1]}行列を評価中..."):
+            st.caption(f"参考評価: {len(knowledge)}件")
+            
+            if knowledge:
+                with st.expander("参考にした評価", expanded=False):
+                    for k in knowledge:
+                        sign = "+" if k["score"] > 0 else ""
+                        st.caption(f"{k['from_node']} → {k['to_node']}: {sign}{k['score']}")
+            
+            llm_client = LLMClient()
+            
+            matrix = llm_client.evaluate_matrix_with_knowledge(
+                from_category=from_category,
+                to_category=to_category,
+                from_nodes=from_nodes,
+                to_nodes=to_nodes,
+                idef0_from=idef0_from,
+                idef0_to=idef0_to,
+                process_name=process_name,
+                knowledge=knowledge,
+                distance=distance
+            )
+        
+        for i, from_node in enumerate(from_nodes):
+            for j, to_node in enumerate(to_nodes):
+                score = matrix[i][j]
+                
+                SessionManager.add_evaluation(
+                    from_node=from_node,
+                    to_node=to_node,
+                    score=score,
+                    reason=""
+                )
+                
+                evaluator.add_evaluation_result(from_node, to_node, score)
+        
+        st.session_state.completed_plans.add(plan_idx)
+        
+        non_zero_count = sum(1 for row in matrix for val in row if val != 0)
+        total_count = len(from_nodes) * len(to_nodes)
+        
+        st.success(
+            f"✅ 評価完了！非ゼロ: {non_zero_count}/{total_count}ペア "
+            f"({100 * non_zero_count / total_count:.1f}%)"
+        )
+        
+    except Exception as e:
+        st.error(f"❌ 評価エラー: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
 def tab5_matrix_analysis():
     """タブ5: 行列分析とヒートマップ可視化"""
     import pandas as pd
