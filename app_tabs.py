@@ -11,6 +11,7 @@ from openai import OpenAIError
 from config.settings import settings
 from core.session_manager import SessionManager
 from core.llm_client import LLMClient
+from utils.matrix_evaluator import MatrixEvaluator
 from core.data_models import (
     FunctionalCategory,
     CategoryGenerationOptions,
