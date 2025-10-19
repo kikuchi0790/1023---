@@ -23,6 +23,7 @@ class SessionManager:
                 "process_description": settings.DEFAULT_PROCESS_DESCRIPTION,
                 "functional_categories": [],
                 "nodes": [],
+                "idef0_nodes": {},
                 "evaluations": [],
                 "adjacency_matrix": None,
             }
@@ -94,6 +95,71 @@ class SessionManager:
     def get_nodes() -> List[str]:
         """ノードリストの取得"""
         return st.session_state.project_data["nodes"]
+
+    @staticmethod
+    def set_idef0_node(category: str, idef0_data: Dict[str, Any]) -> None:
+        """
+        IDEF0ノードの設定
+        
+        Args:
+            category: 機能カテゴリ名
+            idef0_data: IDEF0データ（inputs, mechanisms, outputs）
+        """
+        if "idef0_nodes" not in st.session_state.project_data:
+            st.session_state.project_data["idef0_nodes"] = {}
+        
+        st.session_state.project_data["idef0_nodes"][category] = idef0_data
+        
+        SessionManager._update_nodes_from_idef0()
+    
+    @staticmethod
+    def _update_nodes_from_idef0() -> None:
+        """
+        IDEF0ノードデータから統合ノードリストを自動構築
+        内部メソッド: set_idef0_node()から自動的に呼ばれる
+        """
+        if "idef0_nodes" not in st.session_state.project_data:
+            return
+        
+        all_nodes = set()
+        
+        for category, idef0_data in st.session_state.project_data["idef0_nodes"].items():
+            if idef0_data.get("inputs"):
+                all_nodes.update(idef0_data["inputs"])
+            
+            if idef0_data.get("mechanisms"):
+                all_nodes.update(idef0_data["mechanisms"])
+            
+            if idef0_data.get("outputs"):
+                all_nodes.update(idef0_data["outputs"])
+        
+        nodes_list = sorted(list(all_nodes))
+        
+        st.session_state.project_data["nodes"] = nodes_list
+
+    @staticmethod
+    def get_idef0_node(category: str) -> Optional[Dict[str, Any]]:
+        """
+        IDEF0ノードの取得
+        
+        Args:
+            category: 機能カテゴリ名
+            
+        Returns:
+            IDEF0データ、存在しない場合はNone
+        """
+        if "idef0_nodes" not in st.session_state.project_data:
+            st.session_state.project_data["idef0_nodes"] = {}
+        
+        return st.session_state.project_data["idef0_nodes"].get(category)
+
+    @staticmethod
+    def get_all_idef0_nodes() -> Dict[str, Dict[str, Any]]:
+        """全IDEF0ノードの取得"""
+        if "idef0_nodes" not in st.session_state.project_data:
+            st.session_state.project_data["idef0_nodes"] = {}
+        
+        return st.session_state.project_data["idef0_nodes"]
 
     @staticmethod
     def add_evaluation(

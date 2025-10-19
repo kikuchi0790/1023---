@@ -53,6 +53,12 @@ htmlcov/
 *.log
 temp/
 cache/
+debug_logs/
+app.py.backup
+
+# Frontend build artifacts
+components/*/frontend/node_modules/
+components/*/frontend/build/
 
 # Jupyter
 .ipynb_checkpoints/

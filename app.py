@@ -54,48 +54,46 @@ def main() -> None:
         st.divider()
         st.header("2. 機能カテゴリの定義")
 
-        with st.expander("🎯 カテゴリ抽出の詳細設定", expanded=True):
+        with st.expander("🎯 プロセス機能の抽出設定", expanded=True):
+            st.caption("「機能カテゴリ」= プロセスを構成する動的な変換機能（インプット→変換→アウトプット）")
+            
             col1, col2, col3 = st.columns(3)
 
             with col1:
                 analysis_focus = st.selectbox(
-                    "分析の観点",
+                    "分析の視点",
                     [
                         "balanced",
-                        "quality",
-                        "cost",
-                        "time",
-                        "safety",
-                        "flexibility"
+                        "material_flow",
+                        "information_flow",
+                        "quality_gates"
                     ],
                     format_func=lambda x: {
                         "balanced": "バランス型（推奨）",
-                        "quality": "品質重視",
-                        "cost": "コスト重視",
-                        "time": "時間重視",
-                        "safety": "安全性重視",
-                        "flexibility": "柔軟性重視"
+                        "material_flow": "モノの流れ重視",
+                        "information_flow": "情報の流れ重視",
+                        "quality_gates": "品質ゲート重視"
                     }[x],
-                    help="どの観点を重視してカテゴリを抽出するか選択します"
+                    help="プロセス分析の視点を選択します"
                 )
 
             with col2:
                 granularity = st.selectbox(
-                    "カテゴリの粒度",
-                    ["standard", "coarse", "detailed"],
+                    "プロセスの分解レベル",
+                    ["standard", "high_level", "detailed"],
                     format_func=lambda x: {
-                        "coarse": "粗い（4-5個）",
-                        "standard": "標準（6-8個）",
-                        "detailed": "詳細（10-12個）"
+                        "high_level": "高レベル（4-5個の大工程）",
+                        "standard": "標準（6-8個の中工程）",
+                        "detailed": "詳細（10-12個の作業工程）"
                     }[x],
-                    help="生成するカテゴリの数と詳細レベル"
+                    help="プロセスをどのレベルまで分解するか"
                 )
 
             with col3:
-                multi_generation = st.checkbox(
-                    "複数案を生成",
+                use_verbalized_sampling = st.checkbox(
+                    "多様性生成（Verbalized Sampling）",
                     value=False,
-                    help="3つの異なる観点から案を生成し、比較できます"
+                    help="5つの異なる分析哲学から生成し、比較できます（推奨）"
                 )
 
         col_btn1, col_btn2 = st.columns([2, 1])
@@ -113,34 +111,32 @@ def main() -> None:
                     try:
                         llm_client = LLMClient()
 
-                        if multi_generation:
-                            st.info("3つの異なる観点から案を生成しています...")
+                        if use_verbalized_sampling:
+                            st.info("🎲 5つの異なる分析哲学から生成しています...")
 
-                            if "category_proposals" not in st.session_state:
-                                st.session_state.category_proposals = []
-
-                            proposals = []
-                            focuses = [analysis_focus, "quality", "cost"]
-
-                            for i, focus in enumerate(focuses, 1):
-                                with st.spinner(f"案{i}を生成中..."):
-                                    options = CategoryGenerationOptions(
-                                        focus=focus,
-                                        granularity=granularity
-                                    )
-                                    categories = llm_client.extract_categories_advanced(
-                                        SessionManager.get_process_name(),
-                                        SessionManager.get_process_description(),
-                                        options
-                                    )
+                            with st.spinner("Verbalized Samplingで多様な視点を生成中..."):
+                                perspectives = llm_client.generate_diverse_category_sets(
+                                    process_name=SessionManager.get_process_name(),
+                                    process_description=SessionManager.get_process_description(),
+                                    num_perspectives=5,
+                                )
+                            
+                            if perspectives:
+                                proposals = []
+                                for i, persp in enumerate(perspectives, 1):
+                                    from core.data_models import FunctionalCategory
+                                    categories = [FunctionalCategory(**cat_data) for cat_data in persp['categories']]
                                     proposals.append({
-                                        "name": f"案{i}: {options.get_focus_description().split('：')[0]}",
+                                        "name": f"{persp['perspective']} (確率: {persp['probability']:.2f})",
+                                        "description": persp['description'],
+                                        "probability": persp['probability'],
                                         "categories": categories,
-                                        "options": options
                                     })
-
-                            st.session_state.category_proposals = proposals
-                            st.success("3つの案を生成しました！下で比較してください。")
+                                
+                                st.session_state.category_proposals = proposals
+                                st.success(f"🎲 {len(perspectives)}つの異なる視点を生成しました！下で比較してください。")
+                            else:
+                                st.error("カテゴリ生成に失敗しました。再試行してください。")
 
                         else:
                             with st.spinner("AIがカテゴリを抽出中です..."):
@@ -192,7 +188,10 @@ def main() -> None:
 
             for idx, (tab, proposal) in enumerate(zip(tabs, st.session_state.category_proposals)):
                 with tab:
-                    st.info(f"カテゴリ数: {len(proposal['categories'])}個")
+                    if "description" in proposal:
+                        st.info(proposal['description'])
+                    
+                    st.caption(f"カテゴリ数: {len(proposal['categories'])}個")
 
                     for cat in proposal['categories']:
                         with st.container():
@@ -203,9 +202,18 @@ def main() -> None:
                                 st.markdown(f"重要度: {'⭐' * cat.importance}")
 
                             st.caption(cat.description)
+                            
+                            if cat.inputs or cat.outputs:
+                                col_in, col_out = st.columns(2)
+                                with col_in:
+                                    if cat.inputs:
+                                        st.caption(f"📥 インプット: {', '.join(cat.inputs[:2])}")
+                                with col_out:
+                                    if cat.outputs:
+                                        st.caption(f"📤 アウトプット: {', '.join(cat.outputs[:2])}")
 
                             if cat.examples:
-                                st.caption(f"例: {', '.join(cat.examples[:3])}")
+                                st.caption(f"🔧 例: {', '.join(cat.examples[:3])}")
 
                             st.divider()
 
@@ -264,7 +272,7 @@ def main() -> None:
                 f"抽出された{len(categories)}個のカテゴリ（詳細情報付き）を確認できます。"
             )
 
-            with st.expander("📋 カテゴリの詳細情報", expanded=True):
+            with st.expander("📋 プロセス機能の詳細情報", expanded=True):
                 for cat_name in categories:
                     if cat_name in categories_metadata:
                         meta = categories_metadata[cat_name]
@@ -279,9 +287,20 @@ def main() -> None:
                             if meta.get("description"):
                                 st.markdown(f"**説明:** {meta['description']}")
 
+                            if meta.get("inputs") or meta.get("outputs"):
+                                col_in, col_out = st.columns(2)
+                                with col_in:
+                                    if meta.get("inputs"):
+                                        inputs_str = "、".join(meta["inputs"][:3])
+                                        st.caption(f"📥 **インプット:** {inputs_str}")
+                                with col_out:
+                                    if meta.get("outputs"):
+                                        outputs_str = "、".join(meta["outputs"][:2])
+                                        st.caption(f"📤 **アウトプット:** {outputs_str}")
+
                             if meta.get("examples"):
                                 examples_str = "、".join(meta["examples"][:3])
-                                st.caption(f"例: {examples_str}")
+                                st.caption(f"🔧 **具体例:** {examples_str}")
 
                             st.divider()
                     else:
@@ -315,6 +334,48 @@ def main() -> None:
         if updated_categories != categories:
             SessionManager.set_functional_categories(updated_categories)
 
+            if "categories_metadata" not in st.session_state:
+                st.session_state.categories_metadata = {}
+
+            old_set = set(categories)
+            new_set = set(updated_categories)
+
+            added = new_set - old_set
+            removed = old_set - new_set
+
+            if len(added) == 1 and len(removed) == 1 and len(updated_categories) == len(categories):
+                old_name = list(removed)[0]
+                new_name = list(added)[0]
+                try:
+                    old_idx = categories.index(old_name)
+                    new_idx = updated_categories.index(new_name)
+                    if old_idx == new_idx:
+                        if old_name in st.session_state.categories_metadata:
+                            metadata = st.session_state.categories_metadata.pop(old_name)
+                            metadata["name"] = new_name
+                            st.session_state.categories_metadata[new_name] = metadata
+                        added.remove(new_name)
+                        removed.remove(old_name)
+                except ValueError:
+                    pass
+
+            for cat_name in added:
+                if cat_name not in st.session_state.categories_metadata:
+                    st.session_state.categories_metadata[cat_name] = {
+                        "name": cat_name,
+                        "description": "",
+                        "transformation_type": "processing",
+                        "inputs": [],
+                        "outputs": [],
+                        "process_phase": "main_process",
+                        "importance": 3,
+                        "examples": []
+                    }
+
+            for cat_name in removed:
+                if cat_name in st.session_state.categories_metadata:
+                    del st.session_state.categories_metadata[cat_name]
+
             if "categories_changed" not in st.session_state:
                 st.session_state.categories_changed = True
 
@@ -335,82 +396,265 @@ def main() -> None:
     st.divider()
 
     if categories:
-        st.header("3. ノードの定義 (Zigzagging)")
-
-        messages = SessionManager.get_messages()
-
-        if not messages:
-            llm_client = LLMClient()
-            initial_message = llm_client.generate_initial_message(
-                SessionManager.get_process_name(), categories
-            )
-            SessionManager.add_message("assistant", initial_message)
-            st.rerun()
-
-        for message in messages:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
-
-        if user_input := st.chat_input("メッセージを入力してください..."):
-            SessionManager.add_message("user", user_input)
-
-            with st.chat_message("user"):
-                st.markdown(user_input)
-
-            try:
-                with st.spinner("AIが応答を生成中..."):
-                    llm_client = LLMClient()
-                    assistant_response = llm_client.chat_zigzagging(
-                        process_name=SessionManager.get_process_name(),
-                        categories=categories,
-                        chat_history=messages,
-                        user_message=user_input,
-                    )
-
-                SessionManager.add_message("assistant", assistant_response)
-
-                with st.chat_message("assistant"):
-                    st.markdown(assistant_response)
-
-                st.rerun()
-
-            except OpenAIError as e:
-                st.error(f"OpenAI APIエラー: {str(e)}")
-            except Exception as e:
-                st.error(f"エラー: {str(e)}")
-
+        st.header("3. ノードの定義")
+        
+        generation_mode = st.radio(
+            "生成モード",
+            ["AI主導対話", "多様性生成（Verbalized Sampling）"],
+            horizontal=True,
+            help="AI主導対話：ソクラテス式の対話で順次生成 / 多様性生成：複数の異なる視点から一度に生成"
+        )
+        
         st.divider()
+        
+        col_main, col_nodes = st.columns([2, 1])
+        
+        with col_nodes:
+            st.subheader("📋 抽出されたノード (IDEF0形式)")
+            
+            all_idef0 = SessionManager.get_all_idef0_nodes()
+            
+            if all_idef0:
+                for category_name, idef0_data in all_idef0.items():
+                    with st.expander(f"**{category_name}**", expanded=True):
+                        if idef0_data.get("inputs"):
+                            st.markdown("**📥 Input:**")
+                            for inp in idef0_data["inputs"]:
+                                st.write(f"  • {inp}")
+                        
+                        if idef0_data.get("mechanisms"):
+                            st.markdown("**🔧 Mechanism:**")
+                            for mech in idef0_data["mechanisms"]:
+                                st.write(f"  • {mech}")
+                        
+                        if idef0_data.get("outputs"):
+                            st.markdown("**📤 Output:**")
+                            for out in idef0_data["outputs"]:
+                                st.write(f"  • {out}")
+                        
+                        if not any([idef0_data.get("inputs"), idef0_data.get("mechanisms"), idef0_data.get("outputs")]):
+                            st.caption("まだ抽出されていません")
+            else:
+                st.info("会話が進むと、IDEF0形式でノードが自動的に抽出されます")
+        
+        with col_main:
+            if "current_category_index" not in st.session_state:
+                st.session_state.current_category_index = 0
+            
+            current_idx = st.session_state.current_category_index
+            total_categories = len(categories)
+            
+            if current_idx < total_categories:
+                current_category = categories[current_idx]
+                st.info(f"📍 現在のカテゴリ: **{current_category}** ({current_idx + 1}/{total_categories})")
+            
+            if generation_mode == "AI主導対話":
+                st.caption("🎯🔬👤 ソクラテス式AI対話")
+                
+                messages = SessionManager.get_messages()
 
-        col1, col2 = st.columns([2, 1])
+                if not messages:
+                    llm_client = LLMClient()
+                    initial_message = llm_client.generate_initial_facilitator_message(
+                        SessionManager.get_process_name(), categories
+                    )
+                    SessionManager.add_message("facilitator", initial_message)
+                    st.rerun()
 
-        with col1:
-            if st.button(
-                "対話からノードを抽出して保存",
-                type="primary",
-                help="これまでの対話からノードを自動抽出します",
-            ):
-                if len(messages) < 2:
-                    st.warning("ノードを抽出するには、もう少し対話を進めてください")
-                else:
-                    try:
-                        with st.spinner("ノードを抽出中..."):
+                st.markdown("### 💬 会話ログ")
+                
+                chat_container = st.container()
+                with chat_container:
+                    for message in messages:
+                        role = message["role"]
+                        
+                        if role == "facilitator":
+                            with st.chat_message("assistant", avatar="🎯"):
+                                st.markdown(f"**[ファシリテーター]**\n\n{message['content']}")
+                        elif role == "expert":
+                            with st.chat_message("assistant", avatar="🔬"):
+                                st.markdown(f"**[エキスパート]**\n\n{message['content']}")
+                        else:
+                            with st.chat_message("user", avatar="👤"):
+                                st.markdown(message['content'])
+
+                st.divider()
+                
+                col_btn1, col_btn2, col_btn3 = st.columns([2, 2, 1])
+                
+                with col_btn1:
+                    if st.button("💭 会話を進める", type="primary", use_container_width=True, help="AIたちの議論を展開します"):
+                        try:
                             llm_client = LLMClient()
-                            nodes = llm_client.extract_nodes_from_chat(messages)
-                            SessionManager.set_nodes(nodes)
-                            st.success(f"{len(nodes)}個のノードを抽出しました！")
+                            
+                            with st.spinner("🎯🔬 AIたちが議論中..."):
+                                discussion = llm_client.generate_ai_discussion(
+                                    process_name=SessionManager.get_process_name(),
+                                    categories=categories,
+                                    current_category_index=st.session_state.current_category_index,
+                                    chat_history=messages,
+                                )
+                            
+                            for msg in discussion:
+                                SessionManager.add_message(msg["role"], msg["content"])
+                            
+                            with st.spinner("📋 IDEF0形式でノードを自動抽出中..."):
+                                current_category = categories[st.session_state.current_category_index]
+                                existing_idef0_data = SessionManager.get_idef0_node(current_category)
+                                
+                                existing_idef0 = None
+                                if existing_idef0_data:
+                                    from core.data_models import IDEF0Node
+                                    existing_idef0 = IDEF0Node(**existing_idef0_data)
+                                
+                                idef0_node = llm_client.extract_nodes_in_idef0_format(
+                                    process_name=SessionManager.get_process_name(),
+                                    process_description=SessionManager.get_process_description(),
+                                    current_category=current_category,
+                                    chat_history=SessionManager.get_messages(),
+                                    existing_idef0=existing_idef0,
+                                )
+                                
+                                SessionManager.set_idef0_node(current_category, idef0_node.model_dump())
+                            
                             st.rerun()
+                        
+                        except OpenAIError as e:
+                            st.error(f"OpenAI APIエラー: {str(e)}")
+                        except Exception as e:
+                            st.error(f"エラー: {str(e)}")
+                
+                with col_btn2:
+                    if st.button("➡️ 次のカテゴリへ", use_container_width=True):
+                        if st.session_state.current_category_index < len(categories) - 1:
+                            st.session_state.current_category_index += 1
+                            st.success(f"カテゴリを変更しました: {categories[st.session_state.current_category_index]}")
+                            st.rerun()
+                        else:
+                            st.warning("すべてのカテゴリを完了しました！")
+                
+                with col_btn3:
+                    if st.button("🔄", help="対話をリセット"):
+                        SessionManager.clear_messages()
+                        st.session_state.current_category_index = 0
+                        if "categories_changed" in st.session_state:
+                            st.session_state.categories_changed = False
+                        st.rerun()
+                
+                user_input = st.chat_input("💬 あなたの知識や意見を入力してください（任意）...")
+                
+                if user_input:
+                    SessionManager.add_message("user", user_input)
 
-                    except json.JSONDecodeError:
-                        st.error("ノードの抽出に失敗しました。対話を続けてください。")
+                    try:
+                        llm_client = LLMClient()
+                        
+                        with st.spinner("🔬 エキスパートAIが応答中..."):
+                            expert_response = llm_client.generate_expert_response(
+                                process_name=SessionManager.get_process_name(),
+                                categories=categories,
+                                chat_history=messages,
+                                user_message=user_input,
+                            )
+
+                        SessionManager.add_message("expert", expert_response)
+
+                        messages_with_expert = SessionManager.get_messages()
+
+                        with st.spinner("🎯 ファシリテーターAIが応答中..."):
+                            facilitator_response = llm_client.generate_facilitator_response(
+                                process_name=SessionManager.get_process_name(),
+                                categories=categories,
+                                chat_history=messages_with_expert,
+                            )
+
+                        SessionManager.add_message("facilitator", facilitator_response)
+                        
+                        with st.spinner("📋 IDEF0形式でノードを自動抽出中..."):
+                            current_category = categories[st.session_state.current_category_index]
+                            existing_idef0_data = SessionManager.get_idef0_node(current_category)
+                            
+                            existing_idef0 = None
+                            if existing_idef0_data:
+                                from core.data_models import IDEF0Node
+                                existing_idef0 = IDEF0Node(**existing_idef0_data)
+                            
+                            idef0_node = llm_client.extract_nodes_in_idef0_format(
+                                process_name=SessionManager.get_process_name(),
+                                process_description=SessionManager.get_process_description(),
+                                current_category=current_category,
+                                chat_history=SessionManager.get_messages(),
+                                existing_idef0=existing_idef0,
+                            )
+                            
+                            SessionManager.set_idef0_node(current_category, idef0_node.model_dump())
+
+                        st.rerun()
+
+                    except OpenAIError as e:
+                        st.error(f"OpenAI APIエラー: {str(e)}")
                     except Exception as e:
                         st.error(f"エラー: {str(e)}")
-
-        with col2:
-            if st.button("対話をリセット", help="チャット履歴をクリアします"):
-                SessionManager.clear_messages()
-                if "categories_changed" in st.session_state:
-                    st.session_state.categories_changed = False
-                st.rerun()
+            
+            elif generation_mode == "多様性生成（Verbalized Sampling）":
+                st.caption("🎲 Verbalized Sampling - AIの多様性を解放")
+                
+                if st.button("🎲 多様な視点で生成", type="primary", use_container_width=True, help="5つの異なる思考モードから生成"):
+                    try:
+                        llm_client = LLMClient()
+                        
+                        with st.spinner("🎲 5つの異なる思考モードから生成中..."):
+                            perspectives = llm_client.generate_diverse_idef0_nodes(
+                                process_name=SessionManager.get_process_name(),
+                                process_description=SessionManager.get_process_description(),
+                                current_category=current_category,
+                                num_perspectives=5,
+                            )
+                        
+                        if perspectives:
+                            st.session_state.diverse_perspectives = perspectives
+                            st.success(f"{len(perspectives)}つの異なる視点を生成しました！")
+                        else:
+                            st.error("視点の生成に失敗しました。再試行してください。")
+                    
+                    except OpenAIError as e:
+                        st.error(f"OpenAI APIエラー: {str(e)}")
+                    except Exception as e:
+                        st.error(f"エラー: {str(e)}")
+                
+                if "diverse_perspectives" in st.session_state and st.session_state.diverse_perspectives:
+                    st.markdown("### 📊 生成された視点の比較")
+                    
+                    perspectives = st.session_state.diverse_perspectives
+                    
+                    num_cols = 3
+                    for i in range(0, len(perspectives), num_cols):
+                        cols = st.columns(num_cols)
+                        for j, col in enumerate(cols):
+                            if i + j < len(perspectives):
+                                persp = perspectives[i + j]
+                                with col:
+                                    with st.container(border=True):
+                                        st.markdown(f"### {persp['perspective']}")
+                                        st.caption(f"確率: {persp['probability']:.2f}")
+                                        st.info(persp['description'])
+                                        
+                                        st.markdown("**📥 Input:**")
+                                        for inp in persp['idef0'].get('inputs', []):
+                                            st.write(f"• {inp}")
+                                        
+                                        st.markdown("**🔧 Mechanism:**")
+                                        for mech in persp['idef0'].get('mechanisms', []):
+                                            st.write(f"• {mech}")
+                                        
+                                        st.markdown("**📤 Output:**")
+                                        for out in persp['idef0'].get('outputs', []):
+                                            st.write(f"• {out}")
+                                        
+                                        if st.button(f"この視点を採用", key=f"adopt_{i+j}", use_container_width=True):
+                                            SessionManager.set_idef0_node(current_category, persp['idef0'])
+                                            st.success(f"『{persp['perspective']}』を採用しました！")
+                                            st.rerun()
 
     nodes = SessionManager.get_nodes()
     if nodes:

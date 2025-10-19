@@ -8,31 +8,50 @@ from pydantic import BaseModel, Field
 
 
 class FunctionalCategory(BaseModel):
-    """機能カテゴリのデータモデル"""
+    """
+    機能カテゴリのデータモデル
+    
+    機能カテゴリ = プロセスを構成する動的な変換機能
+    製品を作り上げるための動的プロセス（インプット→変換→アウトプット）
+    """
 
-    name: str = Field(..., description="カテゴリ名", min_length=1, max_length=100)
+    name: str = Field(..., description="機能名（動的プロセス）", min_length=1, max_length=100)
     description: str = Field(
-        "", description="カテゴリの説明", max_length=500
+        "", description="この機能が何を変換・処理するかの説明", max_length=500
+    )
+    transformation_type: str = Field(
+        "processing",
+        description="変換タイプ（preparation/processing/assembly/inspection/adjustment/packaging/transfer）"
+    )
+    inputs: List[str] = Field(
+        default_factory=list, description="インプット（材料、部品、情報）"
+    )
+    outputs: List[str] = Field(
+        default_factory=list, description="アウトプット（加工品、製品、データ）"
+    )
+    process_phase: str = Field(
+        "main_process",
+        description="プロセスフェーズ（preparation/main_process/verification/completion）"
     )
     importance: int = Field(
         3, description="重要度（1-5）", ge=1, le=5
     )
-    perspective: str = Field(
-        "balanced", description="観点（quality/cost/time/safety/balanced）"
-    )
     examples: List[str] = Field(
-        default_factory=list, description="具体例のリスト"
+        default_factory=list, description="具体的な作業工程の例"
     )
 
     class Config:
         """Pydantic設定"""
         json_schema_extra = {
             "example": {
-                "name": "品質管理",
-                "description": "製品の品質を保証するための検査・測定活動",
+                "name": "部品の組立",
+                "description": "シリンダーブロックにピストンとクランクシャフトを組み付ける",
+                "transformation_type": "assembly",
+                "inputs": ["シリンダーブロック", "ピストン", "クランクシャフト"],
+                "outputs": ["組み立て済みエンジンブロック"],
+                "process_phase": "main_process",
                 "importance": 5,
-                "perspective": "quality",
-                "examples": ["寸法検査", "外観検査", "性能試験"]
+                "examples": ["ピストン挿入", "クランクシャフト取り付け", "締付トルク管理"]
             }
         }
 
@@ -42,11 +61,11 @@ class CategoryGenerationOptions(BaseModel):
 
     focus: str = Field(
         "balanced",
-        description="分析の焦点（balanced/quality/cost/time/safety/flexibility）"
+        description="分析の視点（balanced/material_flow/information_flow/quality_gates）"
     )
     granularity: str = Field(
         "standard",
-        description="粒度（coarse/standard/detailed）"
+        description="プロセスの分解レベル（high_level/standard/detailed）"
     )
     count_min: int = Field(5, description="最小カテゴリ数", ge=3, le=20)
     count_max: int = Field(8, description="最大カテゴリ数", ge=3, le=20)
@@ -56,7 +75,7 @@ class CategoryGenerationOptions(BaseModel):
 
     def get_count_range(self) -> tuple[int, int]:
         """粒度に基づいたカテゴリ数の範囲を取得"""
-        if self.granularity == "coarse":
+        if self.granularity == "high_level":
             return (4, 5)
         elif self.granularity == "detailed":
             return (10, 12)
@@ -66,12 +85,10 @@ class CategoryGenerationOptions(BaseModel):
     def get_focus_description(self) -> str:
         """焦点の説明を取得"""
         focus_descriptions = {
-            "balanced": "バランス型：すべての観点を均等に考慮",
-            "quality": "品質重視：製品・サービスの品質向上を最優先",
-            "cost": "コスト重視：製造コストと効率性を最優先",
-            "time": "時間重視：リードタイムと生産速度を最優先",
-            "safety": "安全性重視：作業者の安全と環境配慮を最優先",
-            "flexibility": "柔軟性重視：変化への対応力と適応性を最優先"
+            "balanced": "バランス型：モノ・情報・品質の流れを総合的に分析",
+            "material_flow": "モノの流れ重視：物理的な材料・部品の変換プロセスに着目",
+            "information_flow": "情報の流れ重視：データ・指示・フィードバックの流れに着目",
+            "quality_gates": "品質ゲート重視：品質確認・検査のタイミングに着目"
         }
         return focus_descriptions.get(self.focus, "")
 
@@ -97,8 +114,37 @@ class CategorySet(BaseModel):
         return len(self.categories)
 
 
+class IDEF0Node(BaseModel):
+    """IDEF0形式のノード（Input-Mechanism-Output構造）"""
+
+    category: str = Field(..., description="所属する機能カテゴリ名")
+    inputs: List[str] = Field(
+        default_factory=list,
+        description="インプット（材料、部品、情報、半製品）"
+    )
+    mechanisms: List[str] = Field(
+        default_factory=list,
+        description="メカニズム（設備、道具、作業工程、スキル、手順）"
+    )
+    outputs: List[str] = Field(
+        default_factory=list,
+        description="アウトプット（加工品、組立品、データ、完成品）"
+    )
+
+    class Config:
+        """Pydantic設定"""
+        json_schema_extra = {
+            "example": {
+                "category": "材料を準備する",
+                "inputs": ["材料発注情報", "部品リスト", "未検査部品"],
+                "mechanisms": ["受入検査", "ノギス", "マイクロメーター", "寸法測定作業"],
+                "outputs": ["検査済み材料", "不良品リスト", "検査記録"]
+            }
+        }
+
+
 class Node(BaseModel):
-    """ノードのデータモデル"""
+    """ノードのデータモデル（後方互換性用）"""
 
     name: str = Field(..., description="ノード名", min_length=1, max_length=200)
     description: str = Field("", description="ノードの説明", max_length=500)
