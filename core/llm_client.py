@@ -2269,115 +2269,34 @@ IDEF0モデリングとZigzagging手法の専門家として、ノード間の�
         
         knowledge_text = self._format_knowledge_for_prompt(knowledge)
         
-        system_prompt = f"""あなたは生産プロセス分析に20年以上従事するベテランコンサルタントです。
-IDEF0モデリングとZigzagging手法の専門家として、ノード間影響を行列形式で評価してください。
+        system_prompt = f"""プロセス '{process_name}' の{phase_name}を評価してください。
 
-# 評価対象プロセス
-プロセス名: {process_name}
+# 評価ルール
+1. スコア: ±0, ±1, ±3, ±5, ±7, ±9 のみ使用
+2. 正(+): 改善方向、負(-): トレードオフ
+3. How推論: 「この要素を改善すると、あの要素はどう変化するか？」
+4. 対角線（同じノード間）は必ず0
 
-# 評価フェーズ
-{phase_name}: {phase_desc}
-
-## カテゴリ '{from_category}' のIDEF0構造
-機能: {idef0_from.get('function', '')}
-
-Outputs（性能・成果物）:
-{chr(10).join(f'- {o}' for o in idef0_from.get('outputs', []))}
-
-Mechanisms（手段・道具）:
-{chr(10).join(f'- {m}' for m in idef0_from.get('mechanisms', []))}
-
-Inputs（材料・情報）:
-{chr(10).join(f'- {i}' for i in idef0_from.get('inputs', []))}
-
-## カテゴリ '{to_category}' のIDEF0構造
-機能: {idef0_to.get('function', '')}
-
-Outputs（性能・成果物）:
-{chr(10).join(f'- {o}' for o in idef0_to.get('outputs', []))}
-
-Mechanisms（手段・道具）:
-{chr(10).join(f'- {m}' for m in idef0_to.get('mechanisms', []))}
-
-Inputs（材料・情報）:
-{chr(10).join(f'- {i}' for i in idef0_to.get('inputs', []))}
-
-# 参考評価（ナレッジ）
+# 参考評価
 {knowledge_text}
 
-# Zigzagging評価原則（疎で階層的な行列の生成）
-
-## 評価の問いかけ（How推論）
-
-各ペアについて、以下の問いかけで論理的な依存関係を判断してください：
-
-**問い**: 「この要素（from）を改善すると、あの要素（to）は【どのように(How)】変化するか？」
-
-## スコアリング基準
-
-### 許可される絶対値
-**±0, ±1, ±3, ±5, ±7, ±9 のみ**
-
-絶対値の意味：
-- **9**: 決定的な因果関係（この要素なしでは成立しない）
-- **7**: 非常に強い因果関係（主要な影響要因）
-- **5**: 顕著な因果関係（品質や効率に明確な差）
-- **3**: 中程度の因果関係（改善効果あり）
-- **1**: 軽微な因果関係（影響は小さい）
-- **0**: 論理的な因果関係なし
-
-符号の意味：
-- **正（+）**: 改善方向の影響（品質向上、効率化など）
-- **負（-）**: トレードオフ関係（一方を改善すると他方が悪化）
-
-### ❌ How関係が不明確・間接的 → 0評価
-- 論理的な因果関係が説明できない
-- 他の要因を経由する間接的な影響のみ
-
-## 疎行列の厳守（文献の原理）
-
-**重要**: 設計の論理的依存関係（親子関係）に沿った、**直接的で強い影響のみ**を抽出してください。
-
-- 間接的な関係や弱い相関は0としてください
-- 「疎で階層的」な構造を維持してください
-- 総当たり的な評価ではなく、論理的な依存関係に基づく評価を行ってください
-
-## 制約条件
-{constraint_desc}
-
 # タスク
-{n}個の評価元ノード（行）と{m}個の評価先ノード（列）について、
-{n}×{m}の評価行列を生成してください。
-
-行列の各成分[i][j]は、from_nodes[i] → to_nodes[j] の影響スコアです。
+{n}×{m}の評価行列を生成（各成分は上記スコア）
 """
 
         row_list = "\n".join(f"{i+1}. {node}" for i, node in enumerate(from_nodes))
         col_list = "\n".join(f"{i+1}. {node}" for i, node in enumerate(to_nodes))
         
-        user_prompt = f"""# 評価元ノード（行方向、{n}個）
+        user_prompt = f"""# 行（{n}個）
 {row_list}
 
-# 評価先ノード（列方向、{m}個）
+# 列（{m}個）
 {col_list}
 
-# 出力形式（必ずJSON形式で）
+# 出力（JSON）
+{{"matrix": [[各{m}個の数値を省略なく列挙]×{n}行]}}
 
-{{
-  "matrix": [
-    [row1_col1, row1_col2, ..., row1_col{m}],
-    [row2_col1, row2_col2, ..., row2_col{m}],
-    ...
-    [row{n}_col1, row{n}_col2, ..., row{n}_col{m}]
-  ]
-}}
-
-# 重要な指示
-1. 行列は{n}×{m}（{n}行{m}列）の2次元配列です
-2. 各成分は **±0, ±1, ±3, ±5, ±7, ±9 のいずれか**
-3. 疎行列の原則: 強い影響がない場合はscore=0
-4. ナレッジ（参考評価）と相対的に整合性を保ってください
-5. 対角線成分（i==j）は必ず0（自己影響なし）
+例: {{"matrix": [[0,3,0,5,0,0,7,0,0,1,0,0],[7,0,0,3,0,0,0,0,0,0,0,5],...{n}行]}}
 """
 
         messages = [
