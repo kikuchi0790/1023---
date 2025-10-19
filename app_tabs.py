@@ -603,10 +603,10 @@ def tab3_node_definition():
             # 視点数選択スライダー
             num_perspectives = st.slider(
                 "生成する視点の数",
-                min_value=3,
+                min_value=1,
                 max_value=5,
                 value=3,
-                help="多いほど多様な視点が得られますが、生成時間が長くなります（推奨: 3視点）"
+                help="1視点: 最速（約30秒）、3視点: 推奨バランス、5視点: 最大多様性"
             )
             
             st.info(f"💡 {num_perspectives}つの視点を順次生成します。各視点の進捗が表示されます。")
