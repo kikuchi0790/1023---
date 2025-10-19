@@ -1101,6 +1101,8 @@ def tab4_node_evaluation():
                 phase_groups[phase_idx] = []
             phase_groups[phase_idx].append((i, plan))
         
+        first_uncompleted_phase = min(phase_groups.keys()) if phase_groups else 1
+        
         for phase_idx in sorted(phase_groups.keys()):
             phase_plans = phase_groups[phase_idx]
             phase_name = {
@@ -1109,8 +1111,11 @@ def tab4_node_evaluation():
                 3: "フェーズ3: 遠距離"
             }[phase_idx]
             
-            with st.expander(f"📊 {phase_name} ({len(phase_plans)}件)", expanded=(phase_idx == 1)):
-                if st.button(f"🚀 {phase_name}を全て評価", type="primary", key=f"batch_eval_phase_{phase_idx}"):
+            st.markdown(f"### 📊 {phase_name} ({len(phase_plans)}件)")
+            
+            st.info(f"💡 ナレッジベース: {len(evaluator.knowledge_base)}件の非ゼロ評価を参照可能")
+            
+            if st.button(f"🚀 {phase_name}を全て評価", type="primary", key=f"batch_eval_phase_{phase_idx}"):
                     progress_bar = st.progress(0.0)
                     status_text = st.empty()
                     
@@ -1139,10 +1144,8 @@ def tab4_node_evaluation():
                     
                     st.success(f"✅ {phase_name}の評価が完了しました！（{success_count}/{total}件成功）")
                     st.rerun()
-                
-                st.markdown("---")
-                st.caption("個別評価:")
-                
+            
+            with st.expander(f"📋 個別評価 ({len(phase_plans)}件)", expanded=(phase_idx == first_uncompleted_phase)):
                 for plan_idx, plan in phase_plans:
                     col_info, col_action = st.columns([3, 1])
                     
