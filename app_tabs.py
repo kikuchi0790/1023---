@@ -1275,7 +1275,8 @@ def _execute_matrix_evaluation(
                 idef0_to=idef0_to,
                 process_name=process_name,
                 knowledge=knowledge,
-                distance=distance
+                distance=distance,
+                categories=evaluator.categories
             )
         
         for i, from_node in enumerate(from_nodes):

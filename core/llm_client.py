@@ -2231,7 +2231,8 @@ IDEF0モデリングとZigzagging手法の専門家として、ノード間の�
         idef0_to: Dict[str, Any],
         process_name: str,
         knowledge: List[Dict[str, Any]],
-        distance: int
+        distance: int,
+        categories: List[str]
     ) -> List[List[int]]:
         """
         ナレッジを活用した行列形式の評価生成
@@ -2269,19 +2270,28 @@ IDEF0モデリングとZigzagging手法の専門家として、ノード間の�
         
         knowledge_text = self._format_knowledge_for_prompt(knowledge)
         
+        process_flow = ' → '.join(categories)
+        
         system_prompt = f"""プロセス '{process_name}' の{phase_name}を評価してください。
 
+# プロセス全体の流れ（時系列順）
+{process_flow}
+
+# 現在の評価位置
+{from_category} → {to_category} （距離{distance}）
+
 # 評価ルール
-1. スコア: ±0, ±1, ±3, ±5, ±7, ±9 のみ使用
+1. スコア: ±0, ±1, ±3, ±9 のみ使用
+   - 0: 無関係、1: 軽微、3: 中程度、9: 決定的
 2. 正(+): 改善方向、負(-): トレードオフ
 3. How推論: 「この要素を改善すると、あの要素はどう変化するか？」
-4. 対角線（同じノード間）は必ず0
+4. 対角線は必ず0
 
 # 参考評価
 {knowledge_text}
 
 # タスク
-{n}×{m}の評価行列を生成（各成分は上記スコア）
+{n}×{m}の評価行列を生成
 """
 
         row_list = "\n".join(f"{i+1}. {node}" for i, node in enumerate(from_nodes))
@@ -2330,7 +2340,7 @@ IDEF0モデリングとZigzagging手法の専門家として、ノード間の�
                     score = int(matrix[i][j])
                     abs_score = abs(score)
                     
-                    if abs_score not in [0, 1, 3, 5, 7, 9]:
+                    if abs_score not in [0, 1, 3, 9]:
                         print(f"⚠️ 不正なスコア値[{i}][{j}]: {score} → 0に補正")
                         matrix[i][j] = 0
                     
