@@ -598,19 +598,45 @@ def tab3_node_definition():
                     st.error(f"エラー: {str(e)}")
         
         elif generation_mode == "多様性生成（Verbalized Sampling）":
-            st.caption("🎲 Verbalized Sampling - 全カテゴリ一括生成")
+            st.caption("🎲 Verbalized Sampling - 全カテゴリ一括生成（段階的生成）")
             
-            if st.button("🎲 多様な視点で生成", type="primary", use_container_width=True, help="5つの異なる思考モードから全カテゴリを生成"):
+            # 視点数選択スライダー
+            num_perspectives = st.slider(
+                "生成する視点の数",
+                min_value=3,
+                max_value=5,
+                value=3,
+                help="多いほど多様な視点が得られますが、生成時間が長くなります（推奨: 3視点）"
+            )
+            
+            st.info(f"💡 {num_perspectives}つの視点を順次生成します。各視点の進捗が表示されます。")
+            
+            if st.button("🎲 多様な視点で生成", type="primary", use_container_width=True, help=f"{num_perspectives}つの異なる思考モードから全カテゴリを生成"):
                 try:
                     llm_client = LLMClient()
                     
-                    with st.spinner("🎲 5つの異なる思考モードから全カテゴリを生成中..."):
-                        perspectives = llm_client.generate_diverse_idef0_nodes_all_categories(
-                            process_name=SessionManager.get_process_name(),
-                            process_description=SessionManager.get_process_description(),
-                            categories=categories,
-                            num_perspectives=5,
-                        )
+                    # プログレスバー用のプレースホルダー
+                    progress_bar = st.progress(0.0)
+                    status_text = st.empty()
+                    
+                    # プログレスコールバック関数
+                    def update_progress(current, total, perspective_name):
+                        progress = (current + 1) / total
+                        progress_bar.progress(progress)
+                        status_text.text(f"🎲 視点 {current + 1}/{total} ({perspective_name}) を生成中...")
+                    
+                    # 段階的生成
+                    perspectives = llm_client.generate_diverse_idef0_nodes_all_categories(
+                        process_name=SessionManager.get_process_name(),
+                        process_description=SessionManager.get_process_description(),
+                        categories=categories,
+                        num_perspectives=num_perspectives,
+                        progress_callback=update_progress,
+                    )
+                    
+                    # 完了
+                    progress_bar.progress(1.0)
+                    status_text.text(f"✅ {num_perspectives}つの視点の生成が完了しました")
                     
                     if perspectives:
                         st.session_state.diverse_perspectives_all = perspectives

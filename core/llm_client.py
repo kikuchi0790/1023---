@@ -1356,49 +1356,45 @@ Zigzagging手法により、IDEF0ノードの粒度を段階的に細かくし�
 
         return refined_idef0
 
-    def generate_diverse_idef0_nodes_all_categories(
+    def generate_single_perspective_idef0(
         self,
         process_name: str,
         process_description: str,
         categories: List[str],
-        num_perspectives: int = 5,
-    ) -> List[Dict[str, Any]]:
+        perspective_examples: str = """1. 品質重視：品質管理・検査・精度を最優先
+2. 効率重視：時間短縮・コスト削減・自動化を最優先
+3. 安全性重視：作業者の安全・リスク管理を最優先
+4. イノベーション重視：新技術・改善・最新手法を重視
+5. 標準作業重視：確立された手順・マニュアル化を重視""",
+    ) -> Dict[str, Any]:
         """
-        Verbalized Samplingで全カテゴリのIDEF0ノードを一括生成
+        1つの視点から全カテゴリのIDEF0ノードを生成
         
         Args:
             process_name: プロセス名
             process_description: プロセス概要
             categories: 全機能カテゴリのリスト
-            num_perspectives: 生成する視点の数（デフォルト5）
+            perspective_examples: 視点の例（プロンプト用）
             
         Returns:
-            視点ごとの全カテゴリIDEF0ノードリスト
-            [
-              {
-                "perspective": "品質重視",
-                "probability": 0.25,
-                "description": "品質管理と検査を最優先する視点",
-                "idef0_nodes": {
-                  "カテゴリ1": {
-                    "category": "カテゴリ1",
-                    "inputs": [...],
-                    "mechanisms": [...],
-                    "outputs": [...]
-                  },
-                  "カテゴリ2": {...},
-                  ...
-                }
-              },
-              ...
-            ]
+            単一視点のIDEF0ノードデータ
+            {
+              "perspective": "品質重視",
+              "probability": 0.25,
+              "description": "品質管理と検査を最優先する視点",
+              "idef0_nodes": {
+                "カテゴリ1": {...},
+                "カテゴリ2": {...},
+                ...
+              }
+            }
         """
         categories_str = "、".join(categories)
         
         system_prompt = f"""あなたは生産プロセスをIDEF0で分析する専門家です。
 
-【Verbalized Sampling指示】
-プロセス全体を{num_perspectives}つの異なる思考モード・視点から分析し、
+【指示】
+プロセス全体を1つの特定の思考モード・視点から分析し、
 各カテゴリのIDEF0ノード（Input-Mechanism-Output）を一括生成してください。
 
 【プロセス情報】
@@ -1409,47 +1405,40 @@ Zigzagging手法により、IDEF0ノードの粒度を段階的に細かくし�
 {categories_str}
 
 【重要】
-- 各視点は互いに異なる「重視点」を反映すること
+- 明確な「重視点」を持つ視点を1つ選択すること
 - 全カテゴリについて、その視点から見たIDEF0ノードを生成すること
 - プロセス全体の一貫性を保つこと
 
-【推奨される視点の例】
-1. 品質重視：品質管理・検査・精度を最優先
-2. 効率重視：時間短縮・コスト削減・自動化を最優先
-3. 安全性重視：作業者の安全・リスク管理を最優先
-4. イノベーション重視：新技術・改善・最新手法を重視
-5. 標準作業重視：確立された手順・マニュアル化を重視
+【視点の例】
+{perspective_examples}
 
 【出力形式（JSON）】
-[
-  {{
-    "perspective": "品質重視",
-    "probability": 0.25,
-    "description": "品質管理と精密検査を最優先する視点",
-    "idef0_nodes": {{
-      "材料準備": {{
-        "category": "材料準備",
-        "inputs": ["材料仕様書", "品質基準"],
-        "mechanisms": ["受入検査", "測定機器"],
-        "outputs": ["検査済み材料", "検査記録"]
-      }},
-      "加工": {{
-        "category": "加工",
-        "inputs": ["検査済み材料", "加工指示"],
-        "mechanisms": ["精密加工機", "品質モニタリング"],
-        "outputs": ["加工品", "測定データ"]
-      }}
+{{
+  "perspective": "品質重視",
+  "probability": 0.2,
+  "description": "品質管理と精密検査を最優先する視点",
+  "idef0_nodes": {{
+    "材料準備": {{
+      "category": "材料準備",
+      "inputs": ["材料仕様書", "品質基準"],
+      "mechanisms": ["受入検査", "測定機器"],
+      "outputs": ["検査済み材料", "検査記録"]
+    }},
+    "加工": {{
+      "category": "加工",
+      "inputs": ["検査済み材料", "加工指示"],
+      "mechanisms": ["精密加工機", "品質モニタリング"],
+      "outputs": ["加工品", "測定データ"]
     }}
-  }},
-  ...
-]
+  }}
+}}
 """
 
         messages = [
             {"role": "system", "content": system_prompt},
             {
                 "role": "user",
-                "content": f"全カテゴリ（{categories_str}）について、{num_perspectives}つの異なる思考モードから一括生成してください。"
+                "content": f"全カテゴリ（{categories_str}）について、1つの明確な視点から一括生成してください。"
             }
         ]
 
@@ -1464,86 +1453,112 @@ Zigzagging手法により、IDEF0ノードの粒度を段階的に細かくし�
             response_text = response_text[:-3]
         response_text = response_text.strip()
 
-        # デバッグ用: レスポンスをファイルに保存
         try:
-            import os
-            import datetime
-            log_dir = "debug_logs"
-            os.makedirs(log_dir, exist_ok=True)
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            log_file = os.path.join(log_dir, f"diversity_response_{timestamp}.txt")
-            with open(log_file, "w", encoding="utf-8") as f:
-                f.write("=== プロンプト ===\n")
-                f.write(system_prompt)
-                f.write("\n\n=== レスポンス ===\n")
-                f.write(response_text)
-            print(f"✅ レスポンスを保存: {log_file}")
-        except Exception as log_error:
-            print(f"⚠️ ログ保存失敗: {log_error}")
-        
-        try:
-            perspectives = json.loads(response_text)
-            if isinstance(perspectives, list):
-                print(f"✅ {len(perspectives)}個の視点を生成しました")
-                
-                # カテゴリ名のマッピングを作成（柔軟なマッチング）
-                for persp in perspectives:
-                    if "idef0_nodes" in persp:
-                        # LLMが生成したカテゴリ名 → 実際のカテゴリ名にマッピング
-                        idef0_nodes_remapped = {}
-                        for generated_cat_name, idef0_data in persp["idef0_nodes"].items():
-                            # 完全一致を優先
-                            if generated_cat_name in categories:
-                                idef0_nodes_remapped[generated_cat_name] = idef0_data
-                            else:
-                                # 部分一致を試行（例: "材料準備" → "材料を準備する"）
-                                matched = False
-                                for actual_cat in categories:
-                                    if generated_cat_name in actual_cat or actual_cat in generated_cat_name:
-                                        idef0_nodes_remapped[actual_cat] = idef0_data
-                                        idef0_data["category"] = actual_cat  # カテゴリ名を修正
-                                        matched = True
-                                        print(f"  🔄 カテゴリ名マッピング: '{generated_cat_name}' → '{actual_cat}'")
-                                        break
-                                
-                                if not matched:
-                                    print(f"  ⚠️ カテゴリ名が一致しません: '{generated_cat_name}' (スキップ)")
+            perspective = json.loads(response_text)
+            
+            # カテゴリ名のマッピング（柔軟なマッチング）
+            if "idef0_nodes" in perspective:
+                idef0_nodes_remapped = {}
+                for generated_cat_name, idef0_data in perspective["idef0_nodes"].items():
+                    # 完全一致を優先
+                    if generated_cat_name in categories:
+                        idef0_nodes_remapped[generated_cat_name] = idef0_data
+                    else:
+                        # 部分一致を試行
+                        matched = False
+                        for actual_cat in categories:
+                            if generated_cat_name in actual_cat or actual_cat in generated_cat_name:
+                                idef0_nodes_remapped[actual_cat] = idef0_data
+                                idef0_data["category"] = actual_cat
+                                matched = True
+                                print(f"  🔄 カテゴリ名マッピング: '{generated_cat_name}' → '{actual_cat}'")
+                                break
                         
-                        persp["idef0_nodes"] = idef0_nodes_remapped
+                        if not matched:
+                            print(f"  ⚠️ カテゴリ名が一致しません: '{generated_cat_name}' (スキップ)")
                 
-                for i, persp in enumerate(perspectives, 1):
-                    if "probability" not in persp:
-                        persp["probability"] = 1.0 / num_perspectives
-                    perspective_name = persp.get("perspective", f"視点{i}")
-                    num_categories = len(persp.get("idef0_nodes", {}))
-                    print(f"  {i}. {perspective_name}: {num_categories}カテゴリ")
+                perspective["idef0_nodes"] = idef0_nodes_remapped
+            
+            if "probability" not in perspective:
+                perspective["probability"] = 0.2
                 
-                return perspectives
-            else:
-                print(f"\n❌ 全カテゴリ多様性生成エラー: レスポンスがリスト形式ではありません")
-                print(f"レスポンスの型: {type(perspectives)}")
-                print(f"レスポンス内容（最初の500文字）:")
-                print(response_text[:500])
-                print(f"\n詳細はdebug_logs/ディレクトリの最新ファイルを確認してください")
-                return []
+            return perspective
+            
         except json.JSONDecodeError as e:
-            print(f"\n❌ 全カテゴリ多様性生成エラー - JSONパースエラー")
+            print(f"\n❌ 単一視点生成エラー - JSONパースエラー")
             print(f"エラー詳細: {e}")
-            print(f"エラー位置: 行 {e.lineno}, 列 {e.colno}")
-            print(f"\nレスポンステキスト（最初の1000文字）:")
-            print(response_text[:1000])
-            print(f"\nレスポンステキスト（最後の500文字）:")
-            print(response_text[-500:])
-            print(f"\n全体はdebug_logs/ディレクトリの最新ファイルを確認してください")
-            return []
+            return {}
         except Exception as e:
-            print(f"\n❌ 全カテゴリ多様性生成エラー - 予期しないエラー")
-            print(f"エラー種類: {type(e).__name__}")
-            print(f"エラー詳細: {e}")
-            print(f"\nレスポンステキスト（最初の500文字）:")
-            print(response_text[:500])
-            print(f"\n詳細はdebug_logs/ディレクトリの最新ファイルを確認してください")
-            return []
+            print(f"\n❌ 単一視点生成エラー - 予期しないエラー: {e}")
+            return {}
+
+    def generate_diverse_idef0_nodes_all_categories(
+        self,
+        process_name: str,
+        process_description: str,
+        categories: List[str],
+        num_perspectives: int = 3,
+        progress_callback=None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Verbalized Samplingで全カテゴリのIDEF0ノードを段階的生成（改善版）
+        
+        Args:
+            process_name: プロセス名
+            process_description: プロセス概要
+            categories: 全機能カテゴリのリスト
+            num_perspectives: 生成する視点の数（デフォルト3、推奨: 3-5）
+            progress_callback: 進捗通知コールバック関数 callback(current, total, perspective_name)
+            
+        Returns:
+            視点ごとの全カテゴリIDEF0ノードリスト
+        """
+        perspectives = []
+        
+        # 視点の例を定義
+        perspective_examples = """1. 品質重視：品質管理・検査・精度を最優先
+2. 効率重視：時間短縮・コスト削減・自動化を最優先
+3. 安全性重視：作業者の安全・リスク管理を最優先
+4. イノベーション重視：新技術・改善・最新手法を重視
+5. 標準作業重視：確立された手順・マニュアル化を重視"""
+        
+        print(f"\n🎲 {num_perspectives}つの視点を段階的に生成します...")
+        
+        # 各視点を順次生成
+        for i in range(num_perspectives):
+            print(f"\n--- 視点 {i+1}/{num_perspectives} を生成中 ---")
+            
+            # プログレスコールバック呼び出し
+            if progress_callback:
+                progress_callback(i, num_perspectives, f"視点{i+1}")
+            
+            # 単一視点を生成
+            perspective = self.generate_single_perspective_idef0(
+                process_name=process_name,
+                process_description=process_description,
+                categories=categories,
+                perspective_examples=perspective_examples,
+            )
+            
+            if perspective and "idef0_nodes" in perspective:
+                perspective_name = perspective.get("perspective", f"視点{i+1}")
+                num_categories = len(perspective.get("idef0_nodes", {}))
+                print(f"✅ {perspective_name}: {num_categories}カテゴリ生成完了")
+                perspectives.append(perspective)
+            else:
+                print(f"⚠️ 視点{i+1}の生成に失敗しました（スキップ）")
+        
+        # 最終プログレスコールバック
+        if progress_callback:
+            progress_callback(num_perspectives, num_perspectives, "完了")
+        
+        # 確率値を正規化
+        if perspectives:
+            for persp in perspectives:
+                persp["probability"] = 1.0 / len(perspectives)
+        
+        print(f"\n✅ 合計{len(perspectives)}個の視点を生成しました")
+        return perspectives
 
     def generate_diverse_category_sets(
         self,
