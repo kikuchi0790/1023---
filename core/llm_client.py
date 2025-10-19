@@ -1995,11 +1995,9 @@ IDEF0モデリングとZigzagging手法の専門家として、ノード間の�
 {{
   "evaluations": [
     {{
-      "pair_index": 1,
       "from_node": "ノード名",
       "to_node": "ノード名",
-      "score": -9～+9の整数,
-      "reason": "評価理由（50-150文字）"
+      "score": -9～+9の整数
     }},
     ...
   ]
@@ -2008,7 +2006,7 @@ IDEF0モデリングとZigzagging手法の専門家として、ノード間の�
 # 重要
 - 全{len(pairs)}件について必ず評価してください
 - 疎行列の原則: 強い影響がない場合はscore=0
-- reasonは簡潔に（なぜそのスコアなのか明確に）
+- スコアのみ出力（理由は不要、高速化のため）
 """
 
         messages = [
@@ -2036,7 +2034,7 @@ IDEF0モデリングとZigzagging手法の専門家として、ノード間の�
                     "from_node": eval_item.get("from_node", ""),
                     "to_node": eval_item.get("to_node", ""),
                     "score": int(eval_item.get("score", 0)),
-                    "reason": eval_item.get("reason", ""),
+                    "reason": "",  # 高速化のため理由は保存しない
                     "auto_assigned": False
                 })
             
@@ -2044,24 +2042,26 @@ IDEF0モデリングとZigzagging手法の専門家として、ノード間の�
         
         except json.JSONDecodeError as e:
             # JSONパースエラー時のフォールバック: 全て0とする
+            print(f"⚠️ JSONパースエラー: {str(e)}")
             return [
                 {
                     "from_node": pair["from_node"],
                     "to_node": pair["to_node"],
                     "score": 0,
-                    "reason": f"LLM評価エラー（JSONパース失敗）: {str(e)}",
+                    "reason": "",
                     "auto_assigned": True
                 }
                 for pair in pairs
             ]
         except Exception as e:
             # その他のエラー
+            print(f"⚠️ LLM評価エラー: {str(e)}")
             return [
                 {
                     "from_node": pair["from_node"],
                     "to_node": pair["to_node"],
                     "score": 0,
-                    "reason": f"LLM評価エラー: {str(e)}",
+                    "reason": "",
                     "auto_assigned": True
                 }
                 for pair in pairs
@@ -2166,11 +2166,9 @@ IDEF0モデリングとZigzagging手法の専門家として、ノード間の�
 {{
   "evaluations": [
     {{
-      "pair_index": 1,
       "from_node": "ノード名",
       "to_node": "ノード名",
-      "score": -6～+6の整数（0を含む）,
-      "reason": "How関係の説明（100-200文字）"
+      "score": -6～+6の整数（0を含む）
     }},
     ...
   ]
@@ -2180,6 +2178,7 @@ IDEF0モデリングとZigzagging手法の専門家として、ノード間の�
 - 全{len(batch)}件について必ず評価
 - 論理的なHow関係が明確な場合のみ非ゼロ
 - 疑わしい場合は0（疎行列の原則）
+- スコアのみ出力（理由は不要、高速化のため）
 """
             
             messages = [
@@ -2208,7 +2207,7 @@ IDEF0モデリングとZigzagging手法の専門家として、ノード間の�
                             "from_node": eval_item.get("from_node", ""),
                             "to_node": eval_item.get("to_node", ""),
                             "score": score,
-                            "reason": f"【Zigzagging推論】\n{eval_item.get('reason', '')}",
+                            "reason": "",  # 高速化のため理由は保存しない
                             "zigzagging_inference": True,
                             "auto_assigned": False
                         })

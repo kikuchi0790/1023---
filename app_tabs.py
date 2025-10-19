@@ -1183,7 +1183,7 @@ def tab4_node_evaluation():
                                 from_node=result["from_node"],
                                 to_node=result["to_node"],
                                 score=result["score"],
-                                reason=result["reason"]
+                                reason=result.get("reason", "")  # 空文字列がデフォルト
                             )
                         
                         status_text.text("")

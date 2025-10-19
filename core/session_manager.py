@@ -163,7 +163,7 @@ class SessionManager:
 
     @staticmethod
     def add_evaluation(
-        from_node: str, to_node: str, score: int, reason: str
+        from_node: str, to_node: str, score: int, reason: str = ""
     ) -> None:
         """
         評価の追加
@@ -172,7 +172,7 @@ class SessionManager:
             from_node: 評価元ノード
             to_node: 評価先ノード
             score: 評価スコア
-            reason: 評価理由
+            reason: 評価理由（オプション、高速化のため通常は空文字列）
         """
         evaluations = st.session_state.project_data["evaluations"]
 
