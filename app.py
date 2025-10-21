@@ -272,7 +272,7 @@ def main() -> None:
                 f"抽出された{len(categories)}個のカテゴリ（詳細情報付き）を確認できます。"
             )
 
-            with st.expander("📋 プロセス機能の詳細情報", expanded=True):
+            with st.expander("📋 プロセス機能の詳細情報", expanded=False):
                 for cat_name in categories:
                     if cat_name in categories_metadata:
                         meta = categories_metadata[cat_name]
@@ -402,7 +402,7 @@ def main() -> None:
             "生成モード",
             ["AI主導対話", "多様性生成（Verbalized Sampling）"],
             horizontal=True,
-            help="AI主導対話：ソクラテス式の対話で順次生成 / 多様性生成：複数の異なる視点から一度に生成"
+            help="AI主導対話：全カテゴリをソクラテス式対話で生成 / 多様性生成：複数の異なる視点から一度に生成"
         )
         
         st.divider()
@@ -415,8 +415,17 @@ def main() -> None:
             all_idef0 = SessionManager.get_all_idef0_nodes()
             
             if all_idef0:
-                for category_name, idef0_data in all_idef0.items():
-                    with st.expander(f"**{category_name}**", expanded=True):
+                selected_cat = st.selectbox(
+                    "カテゴリを選択",
+                    options=list(all_idef0.keys()),
+                    key="idef0_category_selector"
+                )
+                
+                if selected_cat and selected_cat in all_idef0:
+                    idef0_data = all_idef0[selected_cat]
+                    with st.container(border=True):
+                        st.markdown(f"**{selected_cat}**")
+                        
                         if idef0_data.get("inputs"):
                             st.markdown("**📥 Input:**")
                             for inp in idef0_data["inputs"]:
@@ -438,18 +447,10 @@ def main() -> None:
                 st.info("会話が進むと、IDEF0形式でノードが自動的に抽出されます")
         
         with col_main:
-            if "current_category_index" not in st.session_state:
-                st.session_state.current_category_index = 0
-            
-            current_idx = st.session_state.current_category_index
-            total_categories = len(categories)
-            
-            if current_idx < total_categories:
-                current_category = categories[current_idx]
-                st.info(f"📍 現在のカテゴリ: **{current_category}** ({current_idx + 1}/{total_categories})")
+            st.info(f"💡 全{len(categories)}個のカテゴリを一括で議論・生成します")
             
             if generation_mode == "AI主導対話":
-                st.caption("🎯🔬👤 ソクラテス式AI対話")
+                st.caption("🎯🔬👤 ソクラテス式AI対話（全カテゴリ一括）")
                 
                 messages = SessionManager.get_messages()
 
@@ -461,10 +462,7 @@ def main() -> None:
                     SessionManager.add_message("facilitator", initial_message)
                     st.rerun()
 
-                st.markdown("### 💬 会話ログ")
-                
-                chat_container = st.container()
-                with chat_container:
+                with st.container(height=400):
                     for message in messages:
                         role = message["role"]
                         
@@ -480,10 +478,10 @@ def main() -> None:
 
                 st.divider()
                 
-                col_btn1, col_btn2, col_btn3 = st.columns([2, 2, 1])
+                col_btn1, col_btn2 = st.columns([3, 1])
                 
                 with col_btn1:
-                    if st.button("💭 会話を進める", type="primary", use_container_width=True, help="AIたちの議論を展開します"):
+                    if st.button("💭 会話を進める", type="primary", use_container_width=True, help="AIたちが全カテゴリを議論します"):
                         try:
                             llm_client = LLMClient()
                             
@@ -491,7 +489,6 @@ def main() -> None:
                                 discussion = llm_client.generate_ai_discussion(
                                     process_name=SessionManager.get_process_name(),
                                     categories=categories,
-                                    current_category_index=st.session_state.current_category_index,
                                     chat_history=messages,
                                 )
                             
@@ -499,23 +496,15 @@ def main() -> None:
                                 SessionManager.add_message(msg["role"], msg["content"])
                             
                             with st.spinner("📋 IDEF0形式でノードを自動抽出中..."):
-                                current_category = categories[st.session_state.current_category_index]
-                                existing_idef0_data = SessionManager.get_idef0_node(current_category)
-                                
-                                existing_idef0 = None
-                                if existing_idef0_data:
-                                    from core.data_models import IDEF0Node
-                                    existing_idef0 = IDEF0Node(**existing_idef0_data)
-                                
-                                idef0_node = llm_client.extract_nodes_in_idef0_format(
+                                all_idef0_nodes = llm_client.extract_all_idef0_nodes_from_chat(
                                     process_name=SessionManager.get_process_name(),
                                     process_description=SessionManager.get_process_description(),
-                                    current_category=current_category,
+                                    categories=categories,
                                     chat_history=SessionManager.get_messages(),
-                                    existing_idef0=existing_idef0,
                                 )
                                 
-                                SessionManager.set_idef0_node(current_category, idef0_node.model_dump())
+                                for cat_name, idef0_node in all_idef0_nodes.items():
+                                    SessionManager.set_idef0_node(cat_name, idef0_node.model_dump())
                             
                             st.rerun()
                         
@@ -525,18 +514,8 @@ def main() -> None:
                             st.error(f"エラー: {str(e)}")
                 
                 with col_btn2:
-                    if st.button("➡️ 次のカテゴリへ", use_container_width=True):
-                        if st.session_state.current_category_index < len(categories) - 1:
-                            st.session_state.current_category_index += 1
-                            st.success(f"カテゴリを変更しました: {categories[st.session_state.current_category_index]}")
-                            st.rerun()
-                        else:
-                            st.warning("すべてのカテゴリを完了しました！")
-                
-                with col_btn3:
-                    if st.button("🔄", help="対話をリセット"):
+                    if st.button("🔄 リセット", use_container_width=True, help="対話をリセット"):
                         SessionManager.clear_messages()
-                        st.session_state.current_category_index = 0
                         if "categories_changed" in st.session_state:
                             st.session_state.categories_changed = False
                         st.rerun()
@@ -571,23 +550,15 @@ def main() -> None:
                         SessionManager.add_message("facilitator", facilitator_response)
                         
                         with st.spinner("📋 IDEF0形式でノードを自動抽出中..."):
-                            current_category = categories[st.session_state.current_category_index]
-                            existing_idef0_data = SessionManager.get_idef0_node(current_category)
-                            
-                            existing_idef0 = None
-                            if existing_idef0_data:
-                                from core.data_models import IDEF0Node
-                                existing_idef0 = IDEF0Node(**existing_idef0_data)
-                            
-                            idef0_node = llm_client.extract_nodes_in_idef0_format(
+                            all_idef0_nodes = llm_client.extract_all_idef0_nodes_from_chat(
                                 process_name=SessionManager.get_process_name(),
                                 process_description=SessionManager.get_process_description(),
-                                current_category=current_category,
+                                categories=categories,
                                 chat_history=SessionManager.get_messages(),
-                                existing_idef0=existing_idef0,
                             )
                             
-                            SessionManager.set_idef0_node(current_category, idef0_node.model_dump())
+                            for cat_name, idef0_node in all_idef0_nodes.items():
+                                SessionManager.set_idef0_node(cat_name, idef0_node.model_dump())
 
                         st.rerun()
 
@@ -597,64 +568,88 @@ def main() -> None:
                         st.error(f"エラー: {str(e)}")
             
             elif generation_mode == "多様性生成（Verbalized Sampling）":
-                st.caption("🎲 Verbalized Sampling - AIの多様性を解放")
+                st.caption("🎲 Verbalized Sampling - 全カテゴリ一括生成")
                 
-                if st.button("🎲 多様な視点で生成", type="primary", use_container_width=True, help="5つの異なる思考モードから生成"):
+                if st.button("🎲 多様な視点で生成", type="primary", use_container_width=True, help="5つの異なる思考モードから全カテゴリを生成"):
                     try:
                         llm_client = LLMClient()
                         
-                        with st.spinner("🎲 5つの異なる思考モードから生成中..."):
-                            perspectives = llm_client.generate_diverse_idef0_nodes(
+                        with st.spinner("🎲 5つの異なる思考モードから全カテゴリを生成中..."):
+                            perspectives = llm_client.generate_diverse_idef0_nodes_all_categories(
                                 process_name=SessionManager.get_process_name(),
                                 process_description=SessionManager.get_process_description(),
-                                current_category=current_category,
+                                categories=categories,
                                 num_perspectives=5,
                             )
                         
                         if perspectives:
-                            st.session_state.diverse_perspectives = perspectives
+                            st.session_state.diverse_perspectives_all = perspectives
                             st.success(f"{len(perspectives)}つの異なる視点を生成しました！")
                         else:
-                            st.error("視点の生成に失敗しました。再試行してください。")
+                            st.error("視点の生成に失敗しました。")
+                            st.warning("💡 ターミナルログを確認してください。詳細なエラー情報が出力されています。")
+                            with st.expander("🔍 トラブルシューティング"):
+                                st.markdown("""
+                                **考えられる原因:**
+                                1. LLMモデルが期待するJSON形式で応答していない
+                                2. プロセス概要が不足している、または複雑すぎる
+                                3. カテゴリ数が多すぎる（推奨: 5-8個）
+                                
+                                **対処方法:**
+                                - ターミナルでStreamlitを起動した場所で詳細ログを確認
+                                - プロセス概要をより具体的に記述
+                                - カテゴリ数を減らす
+                                - モデルを変更（gpt-4o、gpt-4-turboなど）
+                                """)
                     
                     except OpenAIError as e:
                         st.error(f"OpenAI APIエラー: {str(e)}")
+                        with st.expander("詳細を表示"):
+                            st.exception(e)
                     except Exception as e:
                         st.error(f"エラー: {str(e)}")
+                        with st.expander("詳細を表示"):
+                            st.exception(e)
                 
-                if "diverse_perspectives" in st.session_state and st.session_state.diverse_perspectives:
+                if "diverse_perspectives_all" in st.session_state and st.session_state.diverse_perspectives_all:
                     st.markdown("### 📊 生成された視点の比較")
                     
-                    perspectives = st.session_state.diverse_perspectives
+                    perspectives = st.session_state.diverse_perspectives_all
                     
-                    num_cols = 3
-                    for i in range(0, len(perspectives), num_cols):
-                        cols = st.columns(num_cols)
-                        for j, col in enumerate(cols):
-                            if i + j < len(perspectives):
-                                persp = perspectives[i + j]
-                                with col:
-                                    with st.container(border=True):
-                                        st.markdown(f"### {persp['perspective']}")
-                                        st.caption(f"確率: {persp['probability']:.2f}")
-                                        st.info(persp['description'])
+                    tabs = st.tabs([f"{p['perspective']} ({p['probability']:.2f})" for p in perspectives])
+                    
+                    for idx, (tab, persp) in enumerate(zip(tabs, perspectives)):
+                        with tab:
+                            st.info(persp['description'])
+                            
+                            if 'idef0_nodes' in persp:
+                                cat_tabs = st.tabs(list(persp['idef0_nodes'].keys()))
+                                
+                                for cat_tab, (cat_name, idef0_data) in zip(cat_tabs, persp['idef0_nodes'].items()):
+                                    with cat_tab:
+                                        col1, col2, col3 = st.columns(3)
                                         
-                                        st.markdown("**📥 Input:**")
-                                        for inp in persp['idef0'].get('inputs', []):
-                                            st.write(f"• {inp}")
+                                        with col1:
+                                            st.markdown("**📥 Input:**")
+                                            for inp in idef0_data.get('inputs', []):
+                                                st.write(f"• {inp}")
                                         
-                                        st.markdown("**🔧 Mechanism:**")
-                                        for mech in persp['idef0'].get('mechanisms', []):
-                                            st.write(f"• {mech}")
+                                        with col2:
+                                            st.markdown("**🔧 Mechanism:**")
+                                            for mech in idef0_data.get('mechanisms', []):
+                                                st.write(f"• {mech}")
                                         
-                                        st.markdown("**📤 Output:**")
-                                        for out in persp['idef0'].get('outputs', []):
-                                            st.write(f"• {out}")
-                                        
-                                        if st.button(f"この視点を採用", key=f"adopt_{i+j}", use_container_width=True):
-                                            SessionManager.set_idef0_node(current_category, persp['idef0'])
-                                            st.success(f"『{persp['perspective']}』を採用しました！")
-                                            st.rerun()
+                                        with col3:
+                                            st.markdown("**📤 Output:**")
+                                            for out in idef0_data.get('outputs', []):
+                                                st.write(f"• {out}")
+                            
+                            if st.button(f"この視点を採用", key=f"adopt_all_{idx}", type="primary", use_container_width=True):
+                                if 'idef0_nodes' in persp:
+                                    for cat_name, idef0_data in persp['idef0_nodes'].items():
+                                        SessionManager.set_idef0_node(cat_name, idef0_data)
+                                st.success(f"『{persp['perspective']}』を採用しました！")
+                                st.rerun()
 
     nodes = SessionManager.get_nodes()
     if nodes:
@@ -690,6 +685,203 @@ def main() -> None:
 
         if updated_nodes:
             st.caption(f"現在のノード数: {len(updated_nodes)}")
+
+    st.divider()
+    
+    # === ネットワーク可視化セクション ===
+    st.header("ネットワーク可視化")
+    
+    viz_tab1, viz_tab2 = st.tabs(["🎮 3D可視化", "📊 2D可視化"])
+    
+    with viz_tab1:
+        if nodes and len(nodes) >= 2:
+            st.info("💡 3D空間でノード間の関係性を可視化します（要: 隣接行列データ）")
+        
+            # デモ用の隣接行列を生成（実際のデータがあれば置き換え）
+            import numpy as np
+            
+            if "adjacency_matrix" not in st.session_state:
+                # デモ用のランダム隣接行列を生成
+                n = len(nodes)
+                demo_matrix = np.random.randint(-5, 6, size=(n, n))
+                np.fill_diagonal(demo_matrix, 0)
+                st.session_state.adjacency_matrix = demo_matrix
+                st.warning("⚠️ デモ用のランダムデータを表示しています。実際の評価データがあれば自動的に反映されます。")
+            
+            if st.session_state.adjacency_matrix is not None:
+                from utils.networkmaps_bridge import convert_pim_to_networkmaps
+                from components.networkmaps_viewer import networkmaps_3d_viewer
+                
+                col_viewer, col_controls = st.columns([3, 1])
+                
+                with col_controls:
+                    st.subheader("表示設定")
+                    
+                    scale = st.slider(
+                        "空間のスケール",
+                        min_value=5.0,
+                        max_value=20.0,
+                        value=10.0,
+                        step=1.0,
+                        help="ノード間の距離を調整します"
+                    )
+                    
+                    camera_mode = st.radio(
+                        "カメラモード",
+                        options=["3d", "2d"],
+                        format_func=lambda x: "3D視点" if x == "3d" else "2D俯瞰",
+                        help="視点を切り替えます"
+                    )
+                    
+                    st.divider()
+                    st.caption("💡 操作方法")
+                    st.markdown("""
+                    **マウス操作:**
+                    - 🖱️ 左ドラッグ: 回転
+                    - 🖱️ ホイール: ズーム
+                    - 🖱️ 右ドラッグ: パン
+                    - 🖱️ クリック: ノード選択
+                    """)
+            
+                with col_viewer:
+                    try:
+                        diagram_data = convert_pim_to_networkmaps(
+                            nodes=nodes,
+                            adjacency_matrix=st.session_state.adjacency_matrix,
+                            categories=SessionManager.get_functional_categories(),
+                            idef0_data=SessionManager.get_all_idef0_nodes(),
+                            evaluations=st.session_state.get('evaluations', []),
+                            scale=scale
+                        )
+                        
+                        selected_node = networkmaps_3d_viewer(
+                            diagram_data=diagram_data,
+                            height=700,
+                            enable_interaction=True,
+                            camera_mode=camera_mode,
+                            key="pim_network_3d_viewer"
+                        )
+                        
+                        if selected_node:
+                            st.success(f"**選択ノード:** {selected_node['node_name']}")
+                            
+                            st.markdown("### 🔍 詳細情報")
+                            with st.container():
+                                node_idx = nodes.index(selected_node['node_name'])
+                                
+                                st.markdown("**このノードからの影響:**")
+                                outgoing = []
+                                for j, target in enumerate(nodes):
+                                    score = st.session_state.adjacency_matrix[node_idx, j]
+                                    if score != 0:
+                                        outgoing.append(f"→ {target}: **{score:+.1f}**")
+                                
+                                if outgoing:
+                                    for item in outgoing:
+                                        st.markdown(item)
+                                else:
+                                    st.caption("影響なし")
+                                
+                                st.divider()
+                                
+                                st.markdown("**このノードへの影響:**")
+                                incoming = []
+                                for i, source in enumerate(nodes):
+                                    score = st.session_state.adjacency_matrix[i, node_idx]
+                                    if score != 0:
+                                        incoming.append(f"{source} →: **{score:+.1f}**")
+                                
+                                if incoming:
+                                    for item in incoming:
+                                        st.markdown(item)
+                                else:
+                                    st.caption("影響なし")
+                    
+                    except Exception as e:
+                        st.error(f"3D可視化エラー: {str(e)}")
+                        st.caption("**エラー詳細:**")
+                        st.code(str(e), language="python")
+        
+        else:
+            st.warning("ノードが2つ以上必要です。先にステップ3でノードを定義してください。")
+    
+    with viz_tab2:
+        if nodes and len(nodes) >= 2:
+            st.info("💡 2Dグラフでノード間の関係性を可視化します（Cytoscape.js）")
+            
+            if st.session_state.adjacency_matrix is not None:
+                from utils.cytoscape_bridge import convert_pim_to_cytoscape
+                from components.cytoscape_viewer import cytoscape_2d_viewer
+                
+                col_viewer2d, col_controls2d = st.columns([3, 1])
+                
+                with col_controls2d:
+                    st.subheader("表示設定")
+                    
+                    threshold = st.slider(
+                        "スコア閾値",
+                        min_value=0.0,
+                        max_value=9.0,
+                        value=2.0,
+                        step=0.5,
+                        help="この値以上のスコアを持つエッジのみ表示"
+                    )
+                    
+                    layout = st.selectbox(
+                        "レイアウト",
+                        options=["hierarchical", "cose", "breadthfirst", "circle", "grid"],
+                        format_func=lambda x: {
+                            "hierarchical": "階層的（3D構造準拠）",
+                            "cose": "力学モデル",
+                            "breadthfirst": "階層的（自動）",
+                            "circle": "円形",
+                            "grid": "グリッド"
+                        }[x],
+                        help="グラフのレイアウトアルゴリズム"
+                    )
+                    
+                    st.divider()
+                    st.caption("💡 操作方法")
+                    st.markdown("""
+                    **マウス操作:**
+                    - 🖱️ ドラッグ: パン
+                    - 🖱️ ホイール: ズーム
+                    - 🖱️ クリック: ノード選択
+                    
+                    **色の意味:**
+                    - 🟢 Output（成果物）
+                    - 🔵 Mechanism（手段）
+                    - 🟠 Input（材料・情報）
+                    """)
+                
+                with col_viewer2d:
+                    try:
+                        cyto_data = convert_pim_to_cytoscape(
+                            nodes=nodes,
+                            adjacency_matrix=st.session_state.adjacency_matrix,
+                            categories=SessionManager.get_functional_categories(),
+                            idef0_data=SessionManager.get_all_idef0_nodes(),
+                            threshold=threshold,
+                            use_hierarchical_layout=(layout == "hierarchical")
+                        )
+                        
+                        selected_node_2d = cytoscape_2d_viewer(
+                            graph_data=cyto_data,
+                            layout=layout,
+                            height=700,
+                            threshold=threshold,
+                            key="pim_cytoscape_2d"
+                        )
+                        
+                        if selected_node_2d:
+                            st.success(f"**選択ノード:** {selected_node_2d['node_name']}")
+                    
+                    except Exception as e:
+                        st.error(f"2D可視化エラー: {str(e)}")
+                        st.caption("**エラー詳細:**")
+                        st.code(str(e), language="python")
+        else:
+            st.warning("ノードが2つ以上必要です。先にステップ3でノードを定義してください。")
 
     st.divider()
 

@@ -35,9 +35,9 @@
 
 ## アプリケーション構造
 
-### 8ステップのタブ形式UI（反復的プロセス）
+### 9ステップのタブ形式UI（反復的プロセス）
 
-アプリケーションは`app_tabs.py`で実装され、8つのタブで構成されます：
+アプリケーションは`app_tabs.py`で実装され、9つのタブで構成されます：
 
 1. **ステップ1: プロセス定義** - プロセス名と概要の入力
 2. **ステップ2: 機能カテゴリ** - LLMによる自動抽出（多様性生成オプション）
@@ -46,7 +46,8 @@
 5. **ステップ5: 行列分析** - 隣接行列生成とヒートマップ可視化
 6. **ステップ6: ネットワーク可視化** - 3D/2D可視化
 7. **ステップ7: ネットワーク分析** - PageRank、中心性指標
-8. **ステップ8: DSM最適化** - NSGA-IIによる多目的最適化
+8. **ステップ8: DSM最適化** - NSGA-IIによる多目的最適化 + **パーティショニング**
+9. **ステップ9: 高度な分析** - 博士課程レベルの7つの分析手法（Shapley Value, Transfer Entropy, etc.）
 
 **反復的フィードバックループ:**
 - ステップ5-8の分析結果から「粒度が粗い」ノードを発見
@@ -58,7 +59,7 @@
 
 ```
 pim/
-├── app_tabs.py                    # メインアプリケーション（8タブUI）
+├── app_tabs.py                    # メインアプリケーション（9タブUI）
 ├── app.py.backup                  # 旧単一ファイル版（バックアップ）
 ├── config/
 │   └── settings.py                # アプリケーション設定
@@ -71,7 +72,16 @@ pim/
 │   ├── cytoscape_bridge.py        # PIM → Cytoscape変換
 │   ├── idef0_classifier.py        # IDEF0ノード分類とZigzaggingペア生成
 │   ├── evaluation_filter.py       # 論理ルールベース評価フィルタリング
-│   └── dsm_optimizer.py           # DSM最適化（NSGA-II）
+│   ├── dsm_optimizer.py           # DSM最適化（NSGA-II）
+│   ├── dsm_partitioning.py        # DSMパーティショニング（モジュール化・デザインシーケンス）
+│   ├── shapley_analysis.py        # Shapley Value分析（協力貢献度 + 連携安定性）
+│   ├── information_theory_analysis.py  # Transfer Entropy（情報フロー分析）
+│   ├── statistical_testing.py     # Bootstrap統計検定
+│   ├── bayesian_analysis.py       # Bayesian Inference（不確実性定量化）
+│   ├── causal_inference.py        # Pearl's Causal Inference（因果推論）
+│   ├── graph_embedding.py         # Graph Embedding + Community Detection
+│   ├── fisher_information.py      # Fisher Information Matrix（感度分析）
+│   └── analytics_export.py        # 高度な分析結果のエクスポート（Excel/JSON）
 ├── components/
 │   ├── networkmaps_viewer/        # 3D可視化コンポーネント
 │   │   ├── __init__.py
@@ -501,12 +511,16 @@ npm run build
   - ラベル英語化（"Node Influence Heatmap", "To Node", "From Node"）
 - [x] タブ6: 3D/2D可視化
 - [x] タブ7: NetworkX分析（PageRank、中心性） + **粒度調整提案**
-- [x] タブ8: DSM最適化（NSGA-II） + **LLMパラメータ評価**
+- [x] タブ8: DSM最適化（NSGA-II） + **LLMパラメータ評価** + **クラッシュ対策**
   - STEP-1: 設計パラメータ選択（コスト vs 自由度）
   - STEP-2: 依存関係方向決定（調整困難度 vs 競合困難度 vs ループ困難度）
-  - パレートフロント2D/3D可視化
+  - パレートフロント2D/3D可視化（日本語フォント対応）
   - 最適化DSMヒートマップ
   - **LLM自動パラメータ評価**: Cost, Range, Importance, Structureを文脈に応じて自動評価
+  - **軽量モード**: デフォルト100個体×50世代（STEP-1）、100個体×30世代（STEP-2）
+  - **リアルタイム進捗表示**: プログレスバー、推定残り時間、完了メッセージ
+  - **チェックポイント機能**: クラッシュ時の復元対応（`utils/dsm_optimizer.py`）
+  - **同期実行**: シンプルで確実な進捗表示
 
 ### フェーズ2: 反復的知識精緻化（完了）
 
@@ -538,6 +552,68 @@ npm run build
   - バージョンチェック
   - データ型検証
   - インポート後自動リロード
+
+### Week 5: 高度な分析（タブ9）（完了） ✅
+
+- [x] **7つの博士課程レベル分析手法**
+  - Shapley Value（協力貢献度分析）⭐ 推奨
+  - Transfer Entropy（情報フロー分析）⭐ 推奨
+  - Bootstrap統計検定⭐ 推奨
+  - Bayesian Inference（不確実性定量化）
+  - Causal Inference（因果推論）
+  - Graph Embedding（潜在構造発見）
+  - Fisher Information（感度分析）
+
+- [x] **Shapley Value 連携安定性分析** (`utils/shapley_analysis.py:compute_shapley_coalition_stability()`)
+  - 上位25%ノード間の連携強度分析
+  - 密結合ペアTop10の特定
+  - NetworkX spring layoutネットワーク図可視化
+  - **UI要素**: 7つの可視化（他の分析手法を上回る）
+    1. 解釈文（expander）
+    2. メトリクス（4カラム）
+    3. 貢献度ランキング（DataFrame上位20）
+    4. 貢献度分布（横棒グラフ、上位15）
+    5. 累積貢献度（折れ線グラフ、80%ライン）
+    6. カテゴリ別平均貢献度（IDEF0連携）
+    7. **連携安定性分析**（上位貢献者 + 密結合ペア + ネットワーク図）
+
+- [x] **高度な分析結果エクスポート** (`utils/analytics_export.py`)
+  - **Excel形式**: 各分析ごとに複数シート
+    - Shapley: 5シート（Values, Cumulative, Categories, TopContributors, DensePairs）
+    - Transfer Entropy: 3シート（Matrix, Flows, Comparison）
+    - Bootstrap: 2シート（CI, Groups）
+    - Bayesian Inference: 2シート（CredibleIntervals, HighUncertainty）
+    - Causal Inference: 3シート（InterventionEffects, TopTargets, Confounders）
+    - Graph Embedding: 3シート（Communities, Positions2D, Similarity）
+    - Fisher Information: 2シート（SensitivityScores, CramerRaoBounds）
+  - **JSON形式**: 完全な分析結果の構造化データ
+  - サイドバーからワンクリックエクスポート
+
+- [x] **統一UI設計パターン**（全7手法）
+  1. パラメータ設定（sliders, selectors）
+  2. 実行ボタン + 進捗トラッカー
+  3. 結果の解釈（expander）
+  4. メトリクス（4カラム）
+  5. 可視化（matplotlib charts）
+  6. データテーブル（pandas DataFrames）
+
+- [x] **ユーザーガイド** (`docs/USER_GUIDE_TAB9.md`)
+  - 各分析の詳細説明（何がわかるか、どう使うか、結果の見方）
+  - 7手法の比較表（目的、計算時間、推奨度、主な用途）
+  - 推奨ワークフロー（5ステップ）
+  - FAQ（よくある質問）
+
+### オプション実装候補（Phase 2, 3）
+
+- [ ] **Shapley Value収束曲線分析**（1.5時間）
+  - サンプル数を変えて複数回実行
+  - 上位ノードの収束曲線可視化
+  - 収束判定メトリクス
+  
+- [ ] **Shapley Value貢献度分解マトリックス**（2時間）
+  - N×N 貢献度マトリックス（ノードi → ノードj への限界貢献）
+  - ヒートマップ可視化
+  - 上位貢献ペアランキング
 
 ## タブ4: 論理ルールベース評価システム（詳細）
 
@@ -700,6 +776,65 @@ npm run build
 3. 評価結果をDataFrameで表示（ノード名、タイプ、パラメータ値）
 4. 評価の根拠をテキスト表示
 5. STEP-1実行時に選択されたモードのパラメータを使用
+
+### NSGA-II最適化のパフォーマンス改善（2025-10-21実装）
+
+**課題:**
+- STEP-2は大規模データで40分以上かかることがある
+- Streamlitサーバーがメモリ不足でクラッシュ（Exit code 137: OOM Killer）
+- プログレスバーが更新されず、フリーズしているように見える
+
+**解決策:**
+
+#### 1. 軽量モード（デフォルト有効）
+- **STEP-1**: 100個体 × 50世代（従来: 200×100）
+- **STEP-2**: 100個体 × 30世代（従来: 200×50）
+- チェックボックスで切替可能
+- メモリ使用量を50%削減
+
+#### 2. リアルタイム進捗表示
+```python
+# 進捗コールバック（推定残り時間付き）
+def progress_callback(gen: int, pareto_size: int):
+    progress_pct = gen / total_gen
+    eta_seconds = (elapsed / gen) * (total_gen - gen)
+    progress_placeholder.progress(
+        progress_pct,
+        text=f"世代 {gen}/{total_gen} | 推定残り時間: {eta_min}分{eta_sec}秒"
+    )
+```
+
+- **初期メッセージ**: ボタン押下直後に「開始しました」を表示
+- **スピナー**: 画面上部に回転アイコン
+- **プログレスバー**: 毎世代ごとに更新（`save_every=1`）
+- **推定残り時間**: 平均世代時間から自動計算
+- **完了メッセージ**: 実行時間を分秒で表示
+
+#### 3. チェックポイント機能
+- 世代ごとに途中結果を`checkpoints/`に保存
+- クラッシュ時に最新チェックポイントから復元可能
+- 最適化完了後に自動削除
+
+#### 4. 同期実行（非同期から変更）
+- 非同期処理はプログレスバー更新が難しい
+- 同期処理でシンプルかつ確実な進捗表示
+- `st.spinner()`と`st.progress()`の組み合わせ
+
+#### 5. 日本語フォント設定
+```python
+# パレートフロント図の文字化け対策
+plt.rcParams['font.sans-serif'] = ['Hiragino Sans', 'Yu Gothic', 'Meiryo', 'DejaVu Sans']
+plt.rcParams['axes.unicode_minus'] = False
+```
+
+**実行時間の目安（37ノード、軽量モード）:**
+- STEP-1: 30-60秒
+- STEP-2: 20-40秒（ノード数により変動）
+
+**推奨設定:**
+- 軽量モードを有効（メモリ不足防止）
+- ノード数が50以上の場合は個体数を50に削減
+- 長時間処理（10分以上）はサーバーを監視
 
 ## 今後の実装予定
 

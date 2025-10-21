@@ -1689,16 +1689,120 @@ AIの創造性と多様性を最大限に引き出してください。
             print(f"カテゴリ多様性生成エラー: {e}")
             return []
     
+    def _evaluate_dsm_chunk(
+        self,
+        process_name: str,
+        process_description: str,
+        chunk_nodes: List[str],
+        node_classifications: Dict[str, str],
+        node_categories: Dict[str, str]
+    ) -> Dict[str, Any]:
+        """
+        DSMパラメータ評価（チャンク内部メソッド）
+        
+        Args:
+            process_name: プロセス名
+            process_description: プロセス概要
+            chunk_nodes: 評価対象ノードリスト（最大10個）
+            node_classifications: ノード分類
+            node_categories: ノード→カテゴリマッピング
+        
+        Returns:
+            {"parameters": {...}, "reasoning": "..."}
+        """
+        fr_nodes = [n for n in chunk_nodes if node_classifications.get(n) == "FR"]
+        dp_nodes = [n for n in chunk_nodes if node_classifications.get(n) == "DP"]
+        
+        system_prompt = f"""あなたは生産技術に20年以上従事するベテランのコンサルタントであり、設計構造マトリクス（DSM）最適化の専門家です。
+
+# タスク
+「{process_name}」プロセスの各ノードについて、DSM最適化に必要なパラメータを評価してください。
+
+## 評価パラメータ
+
+### Cost（コスト, DP用, 1-5）
+1=低コスト, 2=やや低, 3=中, 4=やや高, 5=高コスト
+
+### Range（変動範囲, DP用, 0.1-2.0）
+0.1=非常に狭い, 0.5=狭い, 1.0=標準, 1.5=広い, 2.0=非常に広い
+
+### Importance（重要度, FR用, 1-5）
+1=低, 2=やや低, 3=中, 4=やや高, 5=高（安全性・法規制・コア機能）
+
+### Structure（構造グループ, 全ノード用）
+論理的なグループ名（例: "加工系", "検査系", "材料系"）
+
+# プロセス情報
+- プロセス名: {process_name}
+- 概要: {process_description}
+
+# 評価対象ノード
+
+## FR（機能要求）: {len(fr_nodes)}個
+{chr(10).join([f"- {node} ({node_categories.get(node, '不明')})" for node in fr_nodes]) if fr_nodes else "(なし)"}
+
+## DP（設計パラメータ）: {len(dp_nodes)}個
+{chr(10).join([f"- {node} ({node_categories.get(node, '不明')})" for node in dp_nodes]) if dp_nodes else "(なし)"}
+
+# 出力形式（厳守）
+```json
+{{
+  "parameters": {{
+    "ノード名": {{
+      "cost": 3,  // DPのみ
+      "range": 1.2,  // DPのみ
+      "importance": 4,  // FRのみ
+      "structure": "グループ名"
+    }}
+  }},
+  "reasoning": "評価根拠を100文字以内で簡潔に"
+}}
+```
+
+注意: 出力はJSON形式のみ。他の説明不要。"""
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"以下{len(chunk_nodes)}個のノードを評価してください。"}
+        ]
+        
+        response_text = self._call_with_retry(messages)
+        
+        response_text = response_text.strip()
+        if response_text.startswith("```json"):
+            response_text = response_text[7:]
+        if response_text.startswith("```"):
+            response_text = response_text[3:]
+        if response_text.endswith("```"):
+            response_text = response_text[:-3]
+        response_text = response_text.strip()
+        
+        try:
+            result = json.loads(response_text)
+            if "parameters" not in result:
+                result["parameters"] = {}
+            if "reasoning" not in result:
+                result["reasoning"] = ""
+            return result
+        except json.JSONDecodeError as e:
+            print(f"DSMチャンク評価エラー: {e}")
+            return {
+                "parameters": {},
+                "reasoning": f"JSONパースエラー: {str(e)}"
+            }
+    
     def evaluate_dsm_parameters(
         self,
         process_name: str,
         process_description: str,
         nodes: List[str],
         idef0_nodes: Dict[str, Dict[str, Any]],
-        node_classifications: Dict[str, str]
+        node_classifications: Dict[str, str],
+        batch_size: int = 10,
+        progress_callback: Optional[callable] = None
     ) -> Dict[str, Any]:
         """
-        DSM最適化パラメータをLLMで評価
+        DSM最適化パラメータをLLMで評価（バッチ処理版）
         
         Args:
             process_name: プロセス名
@@ -1706,6 +1810,8 @@ AIの創造性と多様性を最大限に引き出してください。
             nodes: 全ノードのリスト
             idef0_nodes: IDEF0ノードデータ（カテゴリごと）
             node_classifications: ノード分類（node_name -> "FR" or "DP"）
+            batch_size: チャンクサイズ（デフォルト10）
+            progress_callback: 進捗コールバック関数（0.0-1.0）
         
         Returns:
             {
@@ -1722,10 +1828,6 @@ AIの創造性と多様性を最大限に引き出してください。
             }
         """
         
-        # ノード情報を整理
-        fr_nodes = [n for n, t in node_classifications.items() if t == "FR"]
-        dp_nodes = [n for n, t in node_classifications.items() if t == "DP"]
-        
         # 各ノードのカテゴリを取得
         node_categories = {}
         for category_name, idef0_data in idef0_nodes.items():
@@ -1736,125 +1838,37 @@ AIの創造性と多様性を最大限に引き出してください。
             for input_node in idef0_data.get("inputs", []):
                 node_categories[input_node] = category_name
         
-        system_prompt = f"""あなたは生産技術に20年以上従事するベテランのコンサルタントであり、設計構造マトリクス（DSM）最適化の専門家です。
-
-# タスク
-「{process_name}」プロセスの各ノードについて、DSM最適化に必要な以下のパラメータを評価してください：
-
-## 評価するパラメータ
-
-### 1. Cost（コスト） - DP（設計パラメータ）のみ
-**スケール: 1-5**
-- **1**: 低コスト（簡単な調整、既存リソースで対応可能）
-- **2**: やや低コスト（小規模な投資、軽微な訓練）
-- **3**: 中コスト（一部投資、訓練必要、外部調達あり）
-- **4**: やや高コスト（大規模投資、高度な技術必要）
-- **5**: 高コスト（巨額投資、専門設備・技術、長期開発）
-
-**考慮要素**: 材料費、人件費、設備投資、技術的難易度
-
-### 2. Range（変動範囲） - DP（設計パラメータ）のみ
-**スケール: 0.1-2.0**
-- **0.1**: 非常に狭い（ほとんど変更不可、固定仕様）
-- **0.5**: 狭い（限定的な調整幅）
-- **1.0**: 標準（通常の調整幅）
-- **1.5**: 広い（多様な選択肢）
-- **2.0**: 非常に広い（非常に柔軟、多様な選択肢）
-
-**考慮要素**: 変更の柔軟性、選択肢の多様性、技術的制約
-
-### 3. Importance（重要度） - FR（機能要求）のみ
-**スケール: 1-5**
-- **1**: 低（オプション機能、美観、付加価値）
-- **2**: やや低（利便性、効率の微改善）
-- **3**: 中（品質、効率、顧客満足度）
-- **4**: やや高（主要機能、競争力）
-- **5**: 高（安全性、法規制、コア機能、存続に関わる）
-
-**考慮要素**: ビジネス価値、安全性、品質への影響、法規制
-
-### 4. Structure（構造グループ） - すべてのノード
-**論理的なグループ名**
-同じ部品、工程、システムに属するノードをグループ化します。
-
-**例**: "加工系", "検査系", "材料系", "制御系", "搬送系"など
-
-# プロセス情報
-- **プロセス名**: {process_name}
-- **概要**: {process_description}
-
-# ノード情報
-
-## FR（機能要求 - Outputノード）: {len(fr_nodes)}個
-{chr(10).join([f"- {node} (カテゴリ: {node_categories.get(node, '不明')})" for node in fr_nodes])}
-
-## DP（設計パラメータ - Mechanism + Inputノード）: {len(dp_nodes)}個
-{chr(10).join([f"- {node} (カテゴリ: {node_categories.get(node, '不明')})" for node in dp_nodes])}
-
-# 出力形式（厳守）
-以下のJSON形式で出力してください：
-
-```json
-{{
-  "parameters": {{
-    "ノード名1": {{
-      "cost": 3.5,  // DPのみ、FRの場合は省略
-      "range": 1.2,  // DPのみ、FRの場合は省略
-      "importance": 4,  // FRのみ、DPの場合は省略
-      "structure": "グループ名"
-    }},
-    "ノード名2": {{...}},
-    ...
-  }},
-  "reasoning": "評価の根拠と全体的な考察を200-400文字で記述"
-}}
-```
-
-# 重要な注意事項
-1. すべてのノードについて評価を提供してください
-2. FRにはimportanceとstructureのみ、DPにはcost, range, structureを設定
-3. スケールを厳守してください
-4. reasoningには、プロセス全体の特性と評価の根拠を記述
-5. 出力は必ずJSON形式のみ（他の説明文は不要）"""
-
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": f"「{process_name}」プロセスの全ノードについて、DSMパラメータを評価してください。"
-            }
-        ]
+        # ノードリスト取得
+        node_list = list(node_classifications.keys())
         
-        response_text = self._call_with_retry(messages)
+        # バッチ処理
+        all_parameters = {}
+        reasoning_parts = []
         
-        # JSONパース
-        response_text = response_text.strip()
-        if response_text.startswith("```json"):
-            response_text = response_text[7:]
-        if response_text.startswith("```"):
-            response_text = response_text[3:]
-        if response_text.endswith("```"):
-            response_text = response_text[:-3]
-        response_text = response_text.strip()
+        for i in range(0, len(node_list), batch_size):
+            chunk_nodes = node_list[i:i+batch_size]
+            
+            chunk_result = self._evaluate_dsm_chunk(
+                process_name=process_name,
+                process_description=process_description,
+                chunk_nodes=chunk_nodes,
+                node_classifications=node_classifications,
+                node_categories=node_categories
+            )
+            
+            all_parameters.update(chunk_result["parameters"])
+            if chunk_result["reasoning"]:
+                reasoning_parts.append(chunk_result["reasoning"])
+            
+            # 進捗コールバック
+            if progress_callback:
+                progress = min((i + len(chunk_nodes)) / len(node_list), 1.0)
+                progress_callback(progress)
         
-        try:
-            result = json.loads(response_text)
-            
-            # バリデーション
-            if "parameters" not in result:
-                raise ValueError("'parameters'キーが見つかりません")
-            if "reasoning" not in result:
-                result["reasoning"] = "評価根拠が提供されませんでした"
-            
-            return result
-            
-        except json.JSONDecodeError as e:
-            print(f"DSMパラメータ評価エラー: {e}")
-            print(f"レスポンス: {response_text[:500]}")
-            return {
-                "parameters": {},
-                "reasoning": f"JSONパースエラー: {str(e)}"
-            }
+        return {
+            "parameters": all_parameters,
+            "reasoning": " ".join(reasoning_parts)
+        }
     
     def evaluate_category_batch(
         self,

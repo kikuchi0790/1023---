@@ -7,9 +7,14 @@ Adapted from nsga_2_clean.py for Process Insight Modeler
 
 from __future__ import annotations
 
+import json
 import logging
+import os
+import pickle
 import random
+from datetime import datetime
 from functools import partial
+from pathlib import Path
 from typing import List, Tuple, Dict, Any, Optional
 
 import numpy as np
@@ -17,6 +22,9 @@ import pandas as pd
 from deap import algorithms, base, creator, tools
 
 logger = logging.getLogger(__name__)
+
+CHECKPOINT_DIR = Path("checkpoints")
+CHECKPOINT_DIR.mkdir(exist_ok=True)
 
 RANDOM_SEED = 42
 np.set_printoptions(threshold=np.inf, linewidth=np.inf)
@@ -101,7 +109,9 @@ class PIMDSMData:
             for i, idx in enumerate(reorder_indices):
                 node_name = self.nodes[idx]
                 if node_name in llm_param_data and "cost" in llm_param_data[node_name]:
-                    dp_cost[0, i] = float(llm_param_data[node_name]["cost"])
+                    cost_value = llm_param_data[node_name]["cost"]
+                    if cost_value is not None:
+                        dp_cost[0, i] = float(cost_value)
             self.original_dp_cost = dp_cost
             
             # 構造グループ
@@ -119,7 +129,9 @@ class PIMDSMData:
             for i, idx in enumerate(reorder_indices):
                 node_name = self.nodes[idx]
                 if node_name in llm_param_data and "range" in llm_param_data[node_name]:
-                    dp_range[0, i] = float(llm_param_data[node_name]["range"])
+                    range_value = llm_param_data[node_name]["range"]
+                    if range_value is not None:
+                        dp_range[0, i] = float(range_value)
             self.original_dp_range = dp_range
             
             # 重要度（FR用）
@@ -127,7 +139,9 @@ class PIMDSMData:
             for i, idx in enumerate(reorder_indices):
                 node_name = self.nodes[idx]
                 if node_name in llm_param_data and "importance" in llm_param_data[node_name]:
-                    fn_importance[0, i] = float(llm_param_data[node_name]["importance"])
+                    importance_value = llm_param_data[node_name]["importance"]
+                    if importance_value is not None:
+                        fn_importance[0, i] = float(importance_value)
             self.original_fn_importance = fn_importance
             
         elif self.param_mode == "manual_custom":
@@ -147,7 +161,14 @@ class PIMDSMData:
             # 固定デフォルト値
             self.original_dp_cost = np.ones((1, n))
             
-            structures = [self.node_categories.get(self.nodes[idx], "default") for idx in reorder_indices]
+            structures = []
+            for idx in reorder_indices:
+                node_name = self.nodes[idx]
+                category = self.node_categories.get(node_name, "default")
+                if idx in self.fr_indices:
+                    structures.append(f"{category}_FR")
+                else:
+                    structures.append(f"{category}_DP")
             self.original_dp_structure = np.array([structures]).reshape(1, -1)
             
             self.original_dp_range = np.ones((1, n))
@@ -166,22 +187,74 @@ class PIMDSMData:
         return self.original_matrix.shape[0]
     
     def get_at_request(self) -> np.ndarray:
-        """属性変更/固定マスク"""
-        at_request = np.zeros_like(self.fn_request)
+        """属性変更/固定マスク（簡素化版）
         
-        for idx in range(self.fn_request.shape[1]):
-            flag = self.fn_request[0, idx]
-            if flag in ("変更", "固定"):
-                non_zero_rows = np.where(self.original_matrix[:, idx] != 0)[0]
-                at_request[0, non_zero_rows] = flag
+        FR（Output）: 常に保持（削除しない）
+        DP（Mechanism/Input）: ランダム探索可能
+        """
+        at_request = np.empty((1, len(self.reordered_nodes)), dtype=object)
         
-        for idx in range(self.dp_request.shape[1]):
-            if self.dp_request[0, idx] == "固定":
-                at_request[0, idx] = "固定"
+        for i in range(len(self.reordered_nodes)):
+            if i < self.fn_num:
+                at_request[0, i] = "保持"  # FRは削除しない
+            else:
+                at_request[0, i] = "探索"  # DPはランダム探索
         
-        # すべてのFRを「変更」としてマーク
-        at_request[0][: self.fn_num] = "変更"
         return at_request
+
+
+# -----------------------------------------------------------------------------
+# Checkpoint Management
+# -----------------------------------------------------------------------------
+
+def save_checkpoint(
+    step: str,
+    generation: int,
+    population: list,
+    pareto_front: list,
+    params: Dict[str, Any],
+    checkpoint_id: str
+) -> Path:
+    """チェックポイント保存"""
+    checkpoint_file = CHECKPOINT_DIR / f"{checkpoint_id}_gen{generation}.pkl"
+    
+    checkpoint_data = {
+        "step": step,
+        "generation": generation,
+        "population": population,
+        "pareto_front": pareto_front,
+        "params": params,
+        "timestamp": datetime.now().isoformat()
+    }
+    
+    with open(checkpoint_file, "wb") as f:
+        pickle.dump(checkpoint_data, f)
+    
+    logger.info(f"Checkpoint saved: {checkpoint_file}")
+    return checkpoint_file
+
+
+def load_checkpoint(checkpoint_id: str) -> Optional[Dict[str, Any]]:
+    """最新のチェックポイントを復元"""
+    checkpoint_files = list(CHECKPOINT_DIR.glob(f"{checkpoint_id}_gen*.pkl"))
+    
+    if not checkpoint_files:
+        return None
+    
+    latest = max(checkpoint_files, key=lambda p: int(p.stem.split("gen")[1]))
+    
+    with open(latest, "rb") as f:
+        checkpoint_data = pickle.load(f)
+    
+    logger.info(f"Checkpoint loaded: {latest}")
+    return checkpoint_data
+
+
+def clear_checkpoints(checkpoint_id: str) -> None:
+    """チェックポイントファイル削除"""
+    for f in CHECKPOINT_DIR.glob(f"{checkpoint_id}_gen*.pkl"):
+        f.unlink()
+    logger.info(f"Checkpoints cleared: {checkpoint_id}")
 
 
 # -----------------------------------------------------------------------------
@@ -280,15 +353,17 @@ class PIMStep1NSGA2:
         self.toolbox.register("select", tools.selNSGA2)
     
     def _create_individual(self):
-        """個体生成（バイナリベクトル）"""
+        """個体生成（バイナリベクトル）
+        
+        FR（Output）: 0（保持）
+        DP（Mechanism/Input）: ランダム（0 or 1）
+        """
         ind = []
-        for flag in self.at_request[0]:
-            if flag == "変更":
-                ind.append(0)
-            elif flag == "固定":
-                ind.append(1)
+        for i in range(len(self.data.reordered_nodes)):
+            if i < self.data.fn_num:
+                ind.append(0)  # FRは削除しない
             else:
-                ind.append(random.randint(0, 1))
+                ind.append(random.randint(0, 1))  # DPはランダム
         return self.individual_class(ind)
     
     def _evaluate(self, individual: list[int]) -> Tuple[float, float]:
@@ -306,15 +381,16 @@ class PIMStep1NSGA2:
         return ind1, ind2
     
     def _mutate(self, individual, mutpb: float):
-        """突然変異"""
+        """突然変異
+        
+        FR（Output）: 常に0（保持）
+        DP（Mechanism/Input）: mutpbの確率で反転
+        """
         for i in range(len(individual)):
-            flag = self.at_request[0][i]
-            if flag == "変更":
-                individual[i] = 0
-            elif flag == "固定":
-                individual[i] = 1
+            if i < self.data.fn_num:
+                individual[i] = 0  # FRは必ず0（保持）
             elif random.random() < mutpb:
-                individual[i] = type(individual[i])(not individual[i])
+                individual[i] = 1 - individual[i]  # DPのみ反転
         return (individual,)
     
     def _make_package(self, combo: List[int]) -> dict:
@@ -342,25 +418,100 @@ class PIMStep1NSGA2:
         }
         return pkg
     
-    def run(self, n_pop: int = 300, n_gen: int = 100):
-        """最適化実行"""
+    def run(
+        self, 
+        n_pop: int = 300, 
+        n_gen: int = 100,
+        checkpoint_id: Optional[str] = None,
+        save_every: int = 10,
+        progress_callback: Optional[callable] = None
+    ):
+        """最適化実行（チェックポイント対応）
+        
+        Args:
+            n_pop: 個体数
+            n_gen: 世代数
+            checkpoint_id: チェックポイントID（Noneの場合は保存しない）
+            save_every: チェックポイント保存間隔（世代数）
+            progress_callback: 進捗コールバック関数 callback(gen, pareto_size)
+        """
         logger.info(f"Running STEP-1 NSGA-II: pop={n_pop}, gen={n_gen}")
-        pop = self.toolbox.population(n=n_pop)
+        
         CXPB, MUTPB = 0.9, 0.05
-        algorithms.eaMuPlusLambda(
-            pop,
-            self.toolbox,
-            mu=n_pop,
-            lambda_=n_pop,
-            cxpb=CXPB,
-            mutpb=MUTPB,
-            ngen=n_gen,
-            stats=None,
-            halloffame=None,
-            verbose=False,
-        )
+        start_gen = 0
+        
+        # チェックポイントから復元
+        if checkpoint_id:
+            checkpoint = load_checkpoint(checkpoint_id)
+            if checkpoint and checkpoint.get("step") == "step1":
+                pop = checkpoint["population"]
+                start_gen = checkpoint["generation"] + 1
+                logger.info(f"Resumed from generation {start_gen}")
+            else:
+                pop = self.toolbox.population(n=n_pop)
+        else:
+            pop = self.toolbox.population(n=n_pop)
+        
+        # 初期評価
+        if start_gen == 0:
+            fitnesses = map(self.toolbox.evaluate, pop)
+            for ind, fit in zip(pop, fitnesses):
+                ind.fitness.values = fit
+        
+        # 世代ループ
+        for gen in range(start_gen, n_gen):
+            # 選択
+            offspring = self.toolbox.select(pop, n_pop)
+            offspring = list(map(self.toolbox.clone, offspring))
+            
+            # 交叉
+            for child1, child2 in zip(offspring[::2], offspring[1::2]):
+                if random.random() < CXPB:
+                    self.toolbox.mate(child1, child2)
+                    del child1.fitness.values
+                    del child2.fitness.values
+            
+            # 突然変異
+            for mutant in offspring:
+                if random.random() < MUTPB:
+                    self.toolbox.mutate(mutant)
+                    del mutant.fitness.values
+            
+            # 評価
+            invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
+            fitnesses = map(self.toolbox.evaluate, invalid_ind)
+            for ind, fit in zip(invalid_ind, fitnesses):
+                ind.fitness.values = fit
+            
+            # 次世代
+            pop[:] = offspring + pop
+            pop[:] = self.toolbox.select(pop, n_pop)
+            
+            # パレートフロント
+            pareto_front = tools.sortNondominated(pop, len(pop), first_front_only=True)[0]
+            
+            # 進捗コールバック
+            if progress_callback:
+                progress_callback(gen + 1, len(pareto_front))
+            
+            # チェックポイント保存
+            if checkpoint_id and (gen + 1) % save_every == 0:
+                save_checkpoint(
+                    step="step1",
+                    generation=gen,
+                    population=pop,
+                    pareto_front=pareto_front,
+                    params={"n_pop": n_pop, "n_gen": n_gen},
+                    checkpoint_id=checkpoint_id
+                )
+        
         pareto_front = tools.sortNondominated(pop, len(pop), first_front_only=True)[0]
         logger.info(f"STEP-1 completed: {len(pareto_front)} Pareto solutions found")
+        
+        # 最終チェックポイント削除
+        if checkpoint_id:
+            clear_checkpoints(checkpoint_id)
+        
         return pareto_front
 
 
@@ -616,22 +767,98 @@ class PIMStep2NSGA2:
         loop = calc_loop_difficulty(mat, d["range"])
         return adj, conf, loop
     
-    def run(self, n_pop: int = 300, n_gen: int = 100):
-        """最適化実行"""
+    def run(
+        self,
+        n_pop: int = 300,
+        n_gen: int = 100,
+        checkpoint_id: Optional[str] = None,
+        save_every: int = 10,
+        progress_callback: Optional[callable] = None
+    ):
+        """最適化実行（チェックポイント対応）
+        
+        Args:
+            n_pop: 個体数
+            n_gen: 世代数
+            checkpoint_id: チェックポイントID（Noneの場合は保存しない）
+            save_every: チェックポイント保存間隔（世代数）
+            progress_callback: 進捗コールバック関数 callback(gen, pareto_size)
+        """
         logger.info(f"Running STEP-2 NSGA-II: pop={n_pop}, gen={n_gen}")
-        pop = self.toolbox.population(n=n_pop)
-        algorithms.eaMuPlusLambda(
-            pop,
-            self.toolbox,
-            mu=n_pop // 3,
-            lambda_=2 * n_pop // 3,
-            cxpb=0.9,
-            mutpb=0.05,
-            ngen=n_gen,
-            stats=None,
-            halloffame=None,
-            verbose=False,
-        )
+        
+        CXPB, MUTPB = 0.9, 0.05
+        MU, LAMBDA = n_pop // 3, 2 * n_pop // 3
+        start_gen = 0
+        
+        # チェックポイントから復元
+        if checkpoint_id:
+            checkpoint = load_checkpoint(checkpoint_id)
+            if checkpoint and checkpoint.get("step") == "step2":
+                pop = checkpoint["population"]
+                start_gen = checkpoint["generation"] + 1
+                logger.info(f"Resumed from generation {start_gen}")
+            else:
+                pop = self.toolbox.population(n=n_pop)
+        else:
+            pop = self.toolbox.population(n=n_pop)
+        
+        # 初期評価
+        if start_gen == 0:
+            fitnesses = map(self.toolbox.evaluate, pop)
+            for ind, fit in zip(pop, fitnesses):
+                ind.fitness.values = fit
+        
+        # 世代ループ
+        for gen in range(start_gen, n_gen):
+            # 選択
+            offspring = self.toolbox.select(pop, LAMBDA)
+            offspring = list(map(self.toolbox.clone, offspring))
+            
+            # 交叉
+            for child1, child2 in zip(offspring[::2], offspring[1::2]):
+                if random.random() < CXPB:
+                    self.toolbox.mate(child1, child2)
+                    del child1.fitness.values
+                    del child2.fitness.values
+            
+            # 突然変異
+            for mutant in offspring:
+                if random.random() < MUTPB:
+                    self.toolbox.mutate(mutant)
+                    del mutant.fitness.values
+            
+            # 評価
+            invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
+            fitnesses = map(self.toolbox.evaluate, invalid_ind)
+            for ind, fit in zip(invalid_ind, fitnesses):
+                ind.fitness.values = fit
+            
+            # 次世代（μ + λ選択）
+            pop[:] = self.toolbox.select(pop + offspring, MU)
+            
+            # パレートフロント
+            pareto_front = tools.sortNondominated(pop, len(pop), first_front_only=True)[0]
+            
+            # 進捗コールバック
+            if progress_callback:
+                progress_callback(gen + 1, len(pareto_front))
+            
+            # チェックポイント保存
+            if checkpoint_id and (gen + 1) % save_every == 0:
+                save_checkpoint(
+                    step="step2",
+                    generation=gen,
+                    population=pop,
+                    pareto_front=pareto_front,
+                    params={"n_pop": n_pop, "n_gen": n_gen},
+                    checkpoint_id=checkpoint_id
+                )
+        
         pareto_front = tools.sortNondominated(pop, len(pop), first_front_only=True)[0]
         logger.info(f"STEP-2 completed: {len(pareto_front)} Pareto solutions found")
+        
+        # 最終チェックポイント削除
+        if checkpoint_id:
+            clear_checkpoints(checkpoint_id)
+        
         return pareto_front

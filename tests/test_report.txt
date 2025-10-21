@@ -1,0 +1,521 @@
+[13:00:16] [INFO] ============================================================
+[13:00:16] [INFO] PIMアプリケーション 全体動作確認テスト
+[13:00:16] [INFO] ============================================================
+[13:00:16] [INFO] 
+[13:00:16] [INFO] === タブ1: プロセス定義 ===
+[13:00:16] [ERROR] ❌ タブ1エラー: st.session_state has no attribute "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization
+[13:00:16] [INFO] 
+[13:00:16] [INFO] === タブ2: 機能カテゴリ抽出 ===
+[13:00:16] [INFO] LLMでカテゴリを生成中...
+[13:00:16] [ERROR] ❌ タブ2エラー: 'LLMClient' object has no attribute 'generate_functional_categories'
+[13:00:16] [ERROR] Traceback (most recent call last):
+  File "/Users/kiwi/Desktop/networkmaps/pim/tests/test_full_workflow.py", line 70, in test_tab2_functional_categories
+    result = llm_client.generate_functional_categories(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'LLMClient' object has no attribute 'generate_functional_categories'. Did you mean: 'extract_functional_categories'?
+
+[13:00:16] [INFO] 
+[13:00:16] [INFO] === タブ3: ノード定義 ===
+[13:00:16] [ERROR] ❌ タブ3エラー: st.session_state has no attribute "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization
+[13:00:16] [ERROR] Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 409, in __getitem__
+    return self._getitem(widget_id, key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 454, in _getitem
+    raise KeyError
+KeyError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 127, in __getattr__
+    return self[key]
+           ~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 98, in __getitem__
+    return get_session_state()[key]
+           ~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/safe_session_state.py", line 94, in __getitem__
+    return self._state[key]
+           ~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 411, in __getitem__
+    raise KeyError(_missing_key_error_message(key))
+KeyError: 'st.session_state has no key "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/kiwi/Desktop/networkmaps/pim/tests/test_full_workflow.py", line 98, in test_tab3_node_definition
+    categories = SessionManager.get_functional_categories()
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kiwi/Desktop/networkmaps/pim/core/session_manager.py", line 82, in get_functional_categories
+    return st.session_state.project_data["functional_categories"]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 129, in __getattr__
+    raise AttributeError(_missing_attr_error_message(key))
+AttributeError: st.session_state has no attribute "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization
+
+[13:00:16] [INFO] 
+[13:00:16] [INFO] === タブ4: ノード影響評価（簡易版） ===
+[13:00:16] [ERROR] ❌ タブ4エラー: st.session_state has no attribute "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization
+[13:00:16] [ERROR] Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 409, in __getitem__
+    return self._getitem(widget_id, key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 454, in _getitem
+    raise KeyError
+KeyError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 127, in __getattr__
+    return self[key]
+           ~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 98, in __getitem__
+    return get_session_state()[key]
+           ~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/safe_session_state.py", line 94, in __getitem__
+    return self._state[key]
+           ~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 411, in __getitem__
+    raise KeyError(_missing_key_error_message(key))
+KeyError: 'st.session_state has no key "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/kiwi/Desktop/networkmaps/pim/tests/test_full_workflow.py", line 138, in test_tab4_node_evaluation_simple
+    nodes = SessionManager.get_nodes()
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kiwi/Desktop/networkmaps/pim/core/session_manager.py", line 97, in get_nodes
+    return st.session_state.project_data["nodes"]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 129, in __getattr__
+    raise AttributeError(_missing_attr_error_message(key))
+AttributeError: st.session_state has no attribute "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization
+
+[13:00:16] [INFO] 
+[13:00:16] [INFO] === タブ5: 行列分析 ===
+[13:00:16] [ERROR] ❌ タブ5エラー: 隣接行列が存在しません
+[13:00:16] [ERROR] Traceback (most recent call last):
+  File "/Users/kiwi/Desktop/networkmaps/pim/tests/test_full_workflow.py", line 191, in test_tab5_matrix_analysis
+    raise ValueError("隣接行列が存在しません")
+ValueError: 隣接行列が存在しません
+
+[13:00:16] [INFO] 
+[13:00:16] [INFO] === タブ6: ネットワーク可視化 ===
+[13:00:16] [ERROR] ❌ タブ6エラー: st.session_state has no attribute "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization
+[13:00:16] [ERROR] Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 409, in __getitem__
+    return self._getitem(widget_id, key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 454, in _getitem
+    raise KeyError
+KeyError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 127, in __getattr__
+    return self[key]
+           ~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 98, in __getitem__
+    return get_session_state()[key]
+           ~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/safe_session_state.py", line 94, in __getitem__
+    return self._state[key]
+           ~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 411, in __getitem__
+    raise KeyError(_missing_key_error_message(key))
+KeyError: 'st.session_state has no key "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/kiwi/Desktop/networkmaps/pim/tests/test_full_workflow.py", line 236, in test_tab6_network_visualization
+    nodes = SessionManager.get_nodes()
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kiwi/Desktop/networkmaps/pim/core/session_manager.py", line 97, in get_nodes
+    return st.session_state.project_data["nodes"]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 129, in __getattr__
+    raise AttributeError(_missing_attr_error_message(key))
+AttributeError: st.session_state has no attribute "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization
+
+[13:00:16] [INFO] 
+[13:00:16] [INFO] === タブ7: ネットワーク分析 ===
+[13:00:16] [ERROR] ❌ タブ7エラー: st.session_state has no attribute "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization
+[13:00:16] [ERROR] Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 409, in __getitem__
+    return self._getitem(widget_id, key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 454, in _getitem
+    raise KeyError
+KeyError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 127, in __getattr__
+    return self[key]
+           ~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 98, in __getitem__
+    return get_session_state()[key]
+           ~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/safe_session_state.py", line 94, in __getitem__
+    return self._state[key]
+           ~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 411, in __getitem__
+    raise KeyError(_missing_key_error_message(key))
+KeyError: 'st.session_state has no key "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/kiwi/Desktop/networkmaps/pim/tests/test_full_workflow.py", line 287, in test_tab7_network_analysis
+    nodes = SessionManager.get_nodes()
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kiwi/Desktop/networkmaps/pim/core/session_manager.py", line 97, in get_nodes
+    return st.session_state.project_data["nodes"]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 129, in __getattr__
+    raise AttributeError(_missing_attr_error_message(key))
+AttributeError: st.session_state has no attribute "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization
+
+[13:00:16] [INFO] 
+[13:00:16] [INFO] === タブ8: DSM最適化（基本チェック） ===
+[13:00:17] [ERROR] ❌ タブ8エラー: st.session_state has no attribute "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization
+[13:00:17] [ERROR] Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 409, in __getitem__
+    return self._getitem(widget_id, key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 454, in _getitem
+    raise KeyError
+KeyError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 127, in __getattr__
+    return self[key]
+           ~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 98, in __getitem__
+    return get_session_state()[key]
+           ~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/safe_session_state.py", line 94, in __getitem__
+    return self._state[key]
+           ~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 411, in __getitem__
+    raise KeyError(_missing_key_error_message(key))
+KeyError: 'st.session_state has no key "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/kiwi/Desktop/networkmaps/pim/tests/test_full_workflow.py", line 337, in test_tab8_dsm_optimization_basic
+    nodes = SessionManager.get_nodes()
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kiwi/Desktop/networkmaps/pim/core/session_manager.py", line 97, in get_nodes
+    return st.session_state.project_data["nodes"]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 129, in __getattr__
+    raise AttributeError(_missing_attr_error_message(key))
+AttributeError: st.session_state has no attribute "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization
+
+[13:00:17] [INFO] 
+[13:00:17] [INFO] === データエクスポート/インポート ===
+[13:00:17] [INFO] JSONエクスポート中...
+[13:00:17] [ERROR] ❌ エクスポート/インポートエラー: st.session_state has no attribute "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization
+[13:00:17] [ERROR] Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 409, in __getitem__
+    return self._getitem(widget_id, key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 454, in _getitem
+    raise KeyError
+KeyError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 127, in __getattr__
+    return self[key]
+           ~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 98, in __getitem__
+    return get_session_state()[key]
+           ~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/safe_session_state.py", line 94, in __getitem__
+    return self._state[key]
+           ~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 411, in __getitem__
+    raise KeyError(_missing_key_error_message(key))
+KeyError: 'st.session_state has no key "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/kiwi/Desktop/networkmaps/pim/tests/test_full_workflow.py", line 373, in test_data_export_import
+    export_data = export_to_json()
+                  ^^^^^^^^^^^^^^^^
+  File "/Users/kiwi/Desktop/networkmaps/pim/utils/data_io.py", line 69, in export_to_json
+    "project_data": SessionManager.get_project_data(),
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kiwi/Desktop/networkmaps/pim/core/session_manager.py", line 45, in get_project_data
+    return st.session_state.project_data
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 129, in __getattr__
+    raise AttributeError(_missing_attr_error_message(key))
+AttributeError: st.session_state has no attribute "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization
+
+[13:00:17] [INFO] 
+[13:00:17] [INFO] ============================================================
+[13:00:17] [INFO] テスト結果: 0個成功, 9個失敗
+[13:00:17] [INFO] ============================================================
+[13:00:17] [ERROR] ⚠️ 9個のテストが失敗しました
+[13:00:17] [INFO] 
+失敗したテスト:
+[13:00:17] [INFO]   - ❌ タブ1エラー: st.session_state has no attribute "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization
+[13:00:17] [INFO]   - ❌ タブ2エラー: 'LLMClient' object has no attribute 'generate_functional_categories'
+[13:00:17] [INFO]   - Traceback (most recent call last):
+  File "/Users/kiwi/Desktop/networkmaps/pim/tests/test_full_workflow.py", line 70, in test_tab2_functional_categories
+    result = llm_client.generate_functional_categories(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'LLMClient' object has no attribute 'generate_functional_categories'. Did you mean: 'extract_functional_categories'?
+
+[13:00:17] [INFO]   - ❌ タブ3エラー: st.session_state has no attribute "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization
+[13:00:17] [INFO]   - Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 409, in __getitem__
+    return self._getitem(widget_id, key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 454, in _getitem
+    raise KeyError
+KeyError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 127, in __getattr__
+    return self[key]
+           ~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 98, in __getitem__
+    return get_session_state()[key]
+           ~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/safe_session_state.py", line 94, in __getitem__
+    return self._state[key]
+           ~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 411, in __getitem__
+    raise KeyError(_missing_key_error_message(key))
+KeyError: 'st.session_state has no key "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/kiwi/Desktop/networkmaps/pim/tests/test_full_workflow.py", line 98, in test_tab3_node_definition
+    categories = SessionManager.get_functional_categories()
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kiwi/Desktop/networkmaps/pim/core/session_manager.py", line 82, in get_functional_categories
+    return st.session_state.project_data["functional_categories"]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 129, in __getattr__
+    raise AttributeError(_missing_attr_error_message(key))
+AttributeError: st.session_state has no attribute "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization
+
+[13:00:17] [INFO]   - ❌ タブ4エラー: st.session_state has no attribute "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization
+[13:00:17] [INFO]   - Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 409, in __getitem__
+    return self._getitem(widget_id, key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 454, in _getitem
+    raise KeyError
+KeyError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 127, in __getattr__
+    return self[key]
+           ~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 98, in __getitem__
+    return get_session_state()[key]
+           ~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/safe_session_state.py", line 94, in __getitem__
+    return self._state[key]
+           ~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 411, in __getitem__
+    raise KeyError(_missing_key_error_message(key))
+KeyError: 'st.session_state has no key "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/kiwi/Desktop/networkmaps/pim/tests/test_full_workflow.py", line 138, in test_tab4_node_evaluation_simple
+    nodes = SessionManager.get_nodes()
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kiwi/Desktop/networkmaps/pim/core/session_manager.py", line 97, in get_nodes
+    return st.session_state.project_data["nodes"]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 129, in __getattr__
+    raise AttributeError(_missing_attr_error_message(key))
+AttributeError: st.session_state has no attribute "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization
+
+[13:00:17] [INFO]   - ❌ タブ5エラー: 隣接行列が存在しません
+[13:00:17] [INFO]   - Traceback (most recent call last):
+  File "/Users/kiwi/Desktop/networkmaps/pim/tests/test_full_workflow.py", line 191, in test_tab5_matrix_analysis
+    raise ValueError("隣接行列が存在しません")
+ValueError: 隣接行列が存在しません
+
+[13:00:17] [INFO]   - ❌ タブ6エラー: st.session_state has no attribute "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization
+[13:00:17] [INFO]   - Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 409, in __getitem__
+    return self._getitem(widget_id, key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 454, in _getitem
+    raise KeyError
+KeyError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 127, in __getattr__
+    return self[key]
+           ~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 98, in __getitem__
+    return get_session_state()[key]
+           ~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/safe_session_state.py", line 94, in __getitem__
+    return self._state[key]
+           ~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 411, in __getitem__
+    raise KeyError(_missing_key_error_message(key))
+KeyError: 'st.session_state has no key "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/kiwi/Desktop/networkmaps/pim/tests/test_full_workflow.py", line 236, in test_tab6_network_visualization
+    nodes = SessionManager.get_nodes()
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kiwi/Desktop/networkmaps/pim/core/session_manager.py", line 97, in get_nodes
+    return st.session_state.project_data["nodes"]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 129, in __getattr__
+    raise AttributeError(_missing_attr_error_message(key))
+AttributeError: st.session_state has no attribute "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization
+
+[13:00:17] [INFO]   - ❌ タブ7エラー: st.session_state has no attribute "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization
+[13:00:17] [INFO]   - Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 409, in __getitem__
+    return self._getitem(widget_id, key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 454, in _getitem
+    raise KeyError
+KeyError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 127, in __getattr__
+    return self[key]
+           ~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 98, in __getitem__
+    return get_session_state()[key]
+           ~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/safe_session_state.py", line 94, in __getitem__
+    return self._state[key]
+           ~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 411, in __getitem__
+    raise KeyError(_missing_key_error_message(key))
+KeyError: 'st.session_state has no key "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/kiwi/Desktop/networkmaps/pim/tests/test_full_workflow.py", line 287, in test_tab7_network_analysis
+    nodes = SessionManager.get_nodes()
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kiwi/Desktop/networkmaps/pim/core/session_manager.py", line 97, in get_nodes
+    return st.session_state.project_data["nodes"]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 129, in __getattr__
+    raise AttributeError(_missing_attr_error_message(key))
+AttributeError: st.session_state has no attribute "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization
+
+[13:00:17] [INFO]   - ❌ タブ8エラー: st.session_state has no attribute "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization
+[13:00:17] [INFO]   - Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 409, in __getitem__
+    return self._getitem(widget_id, key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 454, in _getitem
+    raise KeyError
+KeyError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 127, in __getattr__
+    return self[key]
+           ~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 98, in __getitem__
+    return get_session_state()[key]
+           ~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/safe_session_state.py", line 94, in __getitem__
+    return self._state[key]
+           ~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 411, in __getitem__
+    raise KeyError(_missing_key_error_message(key))
+KeyError: 'st.session_state has no key "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/kiwi/Desktop/networkmaps/pim/tests/test_full_workflow.py", line 337, in test_tab8_dsm_optimization_basic
+    nodes = SessionManager.get_nodes()
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kiwi/Desktop/networkmaps/pim/core/session_manager.py", line 97, in get_nodes
+    return st.session_state.project_data["nodes"]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 129, in __getattr__
+    raise AttributeError(_missing_attr_error_message(key))
+AttributeError: st.session_state has no attribute "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization
+
+[13:00:17] [INFO]   - ❌ エクスポート/インポートエラー: st.session_state has no attribute "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization
+[13:00:17] [INFO]   - Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 409, in __getitem__
+    return self._getitem(widget_id, key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 454, in _getitem
+    raise KeyError
+KeyError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 127, in __getattr__
+    return self[key]
+           ~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 98, in __getitem__
+    return get_session_state()[key]
+           ~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/safe_session_state.py", line 94, in __getitem__
+    return self._state[key]
+           ~~~~~~~~~~~^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state.py", line 411, in __getitem__
+    raise KeyError(_missing_key_error_message(key))
+KeyError: 'st.session_state has no key "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/kiwi/Desktop/networkmaps/pim/tests/test_full_workflow.py", line 373, in test_data_export_import
+    export_data = export_to_json()
+                  ^^^^^^^^^^^^^^^^
+  File "/Users/kiwi/Desktop/networkmaps/pim/utils/data_io.py", line 69, in export_to_json
+    "project_data": SessionManager.get_project_data(),
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kiwi/Desktop/networkmaps/pim/core/session_manager.py", line 45, in get_project_data
+    return st.session_state.project_data
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/anaconda3/lib/python3.12/site-packages/streamlit/runtime/state/session_state_proxy.py", line 129, in __getattr__
+    raise AttributeError(_missing_attr_error_message(key))
+AttributeError: st.session_state has no attribute "project_data". Did you forget to initialize it? More info: https://docs.streamlit.io/develop/concepts/architecture/session-state#initialization
+
+[13:00:17] [INFO]   - ⚠️ 9個のテストが失敗しました

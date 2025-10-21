@@ -4,8 +4,11 @@ Process Insight Modeler (PIM) - タブ形式UI
 """
 
 import json
+import time
 import numpy as np
 import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
 import streamlit as st
 from openai import OpenAIError
 from config.settings import settings
@@ -17,6 +20,8 @@ from core.data_models import (
     CategoryGenerationOptions,
     CategorySet
 )
+from utils.analytics_progress import AnalyticsProgressTracker, create_simple_callback
+from utils.analytics_export import add_analytics_export_to_sidebar
 
 
 def render_sidebar():
@@ -146,6 +151,9 @@ def render_sidebar():
                         import traceback
                         with st.expander("エラー詳細"):
                             st.code(traceback.format_exc())
+        
+        # 高度な分析結果のエクスポート
+        add_analytics_export_to_sidebar()
 
 
 def tab1_process_definition():
@@ -1282,18 +1290,21 @@ def _execute_matrix_evaluation(
                 categories=evaluator.categories
             )
         
+        # 行列形式で一括保存（メモリ効率向上）
+        SessionManager.save_evaluation_matrix(
+            from_nodes=from_nodes,
+            to_nodes=to_nodes,
+            matrix=matrix,
+            from_category=from_category,
+            to_category=to_category
+        )
+        
+        # evaluatorのナレッジベース更新（非ゼロのみ）
         for i, from_node in enumerate(from_nodes):
             for j, to_node in enumerate(to_nodes):
                 score = matrix[i][j]
-                
-                SessionManager.add_evaluation(
-                    from_node=from_node,
-                    to_node=to_node,
-                    score=score,
-                    reason=""
-                )
-                
-                evaluator.add_evaluation_result(from_node, to_node, score)
+                if score != 0:  # 非ゼロのみナレッジベースに追加
+                    evaluator.add_evaluation_result(from_node, to_node, score)
         
         st.session_state.completed_plans.add(plan_idx)
         
@@ -1769,6 +1780,10 @@ def tab7_network_analysis():
         with col_viz:
             fig, ax = plt.subplots(figsize=(12, 10))
             
+            # 日本語フォント設定
+            plt.rcParams['font.sans-serif'] = ['Hiragino Sans', 'Yu Gothic', 'Meiryo', 'DejaVu Sans']
+            plt.rcParams['axes.unicode_minus'] = False
+            
             # レイアウト計算
             if layout_type == "spring":
                 pos = nx.spring_layout(G, k=1, iterations=50)
@@ -1999,39 +2014,52 @@ def tab8_dsm_optimization():
         """)
         
         if st.button("🤖 パラメータをLLMで評価", type="primary", use_container_width=True):
-            with st.spinner("LLMがパラメータを評価中..."):
-                try:
-                    from core.llm_client import LLMClient
-                    
-                    llm_client = LLMClient()
-                    
-                    # ノード分類を作成
-                    node_classifications = {}
-                    for node_name in nodes:
-                        node_type, _ = classify_node_type(node_name, all_idef0)
-                        if node_type == NodeType.OUTPUT:
-                            node_classifications[node_name] = "FR"
-                        else:
-                            node_classifications[node_name] = "DP"
-                    
-                    # LLM評価
-                    result = llm_client.evaluate_dsm_parameters(
-                        process_name=SessionManager.get_process_name(),
-                        process_description=SessionManager.get_process_description(),
-                        nodes=nodes,
-                        idef0_nodes=all_idef0,
-                        node_classifications=node_classifications
-                    )
-                    
-                    # セッションに保存
-                    st.session_state.dsm_llm_params = result
-                    
-                    st.success("✅ LLMによるパラメータ評価が完了しました")
-                    
-                except Exception as e:
-                    st.error(f"❌ エラー: {str(e)}")
-                    import traceback
-                    st.code(traceback.format_exc(), language="python")
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            try:
+                from core.llm_client import LLMClient
+                
+                llm_client = LLMClient()
+                
+                # ノード分類を作成
+                node_classifications = {}
+                for node_name in nodes:
+                    node_type, _ = classify_node_type(node_name, all_idef0)
+                    if node_type == NodeType.OUTPUT:
+                        node_classifications[node_name] = "FR"
+                    else:
+                        node_classifications[node_name] = "DP"
+                
+                # 進捗コールバック関数
+                def update_progress(ratio):
+                    progress_bar.progress(ratio)
+                    status_text.text(f"LLMが評価中... {int(ratio*100)}%")
+                
+                # LLM評価（バッチ処理）
+                result = llm_client.evaluate_dsm_parameters(
+                    process_name=SessionManager.get_process_name(),
+                    process_description=SessionManager.get_process_description(),
+                    nodes=nodes,
+                    idef0_nodes=all_idef0,
+                    node_classifications=node_classifications,
+                    batch_size=10,
+                    progress_callback=update_progress
+                )
+                
+                # セッションに保存
+                st.session_state.dsm_llm_params = result
+                
+                progress_bar.empty()
+                status_text.empty()
+                st.success("✅ LLMによるパラメータ評価が完了しました")
+                
+            except Exception as e:
+                progress_bar.empty()
+                status_text.empty()
+                st.error(f"❌ エラー: {str(e)}")
+                import traceback
+                st.code(traceback.format_exc(), language="python")
         
         # 評価結果の表示
         if "dsm_llm_params" in st.session_state and st.session_state.dsm_llm_params:
@@ -2090,71 +2118,104 @@ def tab8_dsm_optimization():
     - **目的2**: 設計自由度最大化（各FRの調整能力比の総和）
     """)
     
+    # 軽量モード
+    lightweight_mode = st.checkbox(
+        "⚡ 軽量モード（推奨）",
+        value=True,
+        help="個体数と世代数を削減し、サーバークラッシュを防ぎます"
+    )
+    
+    if lightweight_mode:
+        default_pop, default_gen = 100, 50
+    else:
+        default_pop, default_gen = 200, 100
+    
     col_p1, col_p2 = st.columns(2)
     with col_p1:
-        step1_pop = st.slider("個体数", 50, 500, 200, 50, key="step1_pop")
+        step1_pop = st.slider("個体数", 50, 500, default_pop, 50, key="step1_pop")
     with col_p2:
-        step1_gen = st.slider("世代数", 20, 200, 50, 10, key="step1_gen")
+        step1_gen = st.slider("世代数", 20, 200, default_gen, 10, key="step1_gen")
+    
+    # データ構築（ボタンの外で準備）
+    llm_params = st.session_state.get("dsm_llm_params") if param_mode == "llm_auto" else None
     
     if st.button("🚀 STEP-1を実行", type="primary", use_container_width=True):
-        with st.spinner(f"NSGA-II最適化中（{step1_gen}世代）..."):
-            try:
-                from utils.dsm_optimizer import PIMDSMData, PIMStep1NSGA2
-                import time
-                
-                start_time = time.time()
-                
-                # データ構築
-                llm_params = st.session_state.get("dsm_llm_params") if param_mode == "llm_auto" else None
-                
-                dsm_data = PIMDSMData(
-                    adj_matrix_df=adj_matrix_df,
-                    nodes=nodes,
-                    idef0_nodes=all_idef0,
-                    param_mode=param_mode,
-                    llm_params=llm_params,
-                    custom_params=None  # 将来的に手動カスタムで使用
+        from utils.dsm_optimizer import PIMDSMData, PIMStep1NSGA2
+        import time
+        
+        progress_placeholder = st.empty()
+        status_placeholder = st.empty()
+        
+        try:
+            start_time = time.time()
+            
+            # データ構築
+            dsm_data = PIMDSMData(
+                adj_matrix_df=adj_matrix_df,
+                nodes=nodes,
+                idef0_nodes=all_idef0,
+                param_mode=param_mode,
+                llm_params=llm_params,
+                custom_params=None
+            )
+            
+            # 進捗コールバック
+            def progress_callback(gen: int, pareto_size: int):
+                progress_pct = gen / step1_gen
+                progress_placeholder.progress(
+                    progress_pct,
+                    text=f"世代 {gen}/{step1_gen} (パレート解: {pareto_size}個)"
                 )
-                
-                # STEP-1実行
-                step1 = PIMStep1NSGA2(dsm_data)
-                pareto_front = step1.run(n_pop=step1_pop, n_gen=step1_gen)
-                
-                elapsed = time.time() - start_time
-                
-                # パレートフロントのデータを抽出
-                step1_results = []
-                for ind in pareto_front:
-                    cost, freedom_inv = ind.fitness.values
-                    removed_indices = [i for i, val in enumerate(ind) if val == 1]
-                    removed_nodes = [dsm_data.reordered_nodes[i] for i in removed_indices]
-                    step1_results.append({
-                        'individual': ind,
-                        'cost': cost,
-                        'freedom_inv': freedom_inv,
-                        'freedom': 1/freedom_inv if freedom_inv != float('inf') else 0,
-                        'removed_count': len(removed_nodes),
-                        'removed_nodes': removed_nodes
-                    })
-                
-                # セッションに保存
-                st.session_state.dsm_data = dsm_data
-                st.session_state.step1_results = step1_results
-                
-                st.success(f"✅ STEP-1完了: {len(pareto_front)}個のパレート解を発見（{elapsed:.1f}秒）")
-                
-            except Exception as e:
-                st.error(f"❌ エラー: {str(e)}")
-                st.code(str(e), language="python")
-                import traceback
-                st.code(traceback.format_exc(), language="python")
-                return
+            
+            # STEP-1実行（同期）
+            step1 = PIMStep1NSGA2(dsm_data)
+            pareto_front = step1.run(
+                n_pop=step1_pop,
+                n_gen=step1_gen,
+                checkpoint_id=None,
+                save_every=10,
+                progress_callback=progress_callback
+            )
+            
+            elapsed = time.time() - start_time
+            
+            # 結果をリスト化
+            step1_results = []
+            for ind in pareto_front:
+                cost, freedom_inv = ind.fitness.values
+                removed_indices = [i for i, val in enumerate(ind) if val == 1]
+                removed_nodes = [dsm_data.reordered_nodes[i] for i in removed_indices]
+                step1_results.append({
+                    'individual': list(ind),
+                    'cost': cost,
+                    'freedom_inv': freedom_inv,
+                    'freedom': 1/freedom_inv if freedom_inv != float('inf') else 0,
+                    'removed_count': len(removed_nodes),
+                    'removed_nodes': removed_nodes
+                })
+            
+            # セッションに保存
+            st.session_state.dsm_data = dsm_data
+            st.session_state.step1_results = step1_results
+            
+            progress_placeholder.empty()
+            status_placeholder.success(f"✅ STEP-1完了: {len(pareto_front)}個のパレート解を発見（{elapsed:.1f}秒）")
+            
+        except Exception as e:
+            progress_placeholder.empty()
+            status_placeholder.error(f"❌ エラー: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc(), language="python")
     
     # STEP-1結果の可視化
     if "step1_results" in st.session_state and st.session_state.step1_results:
         results = st.session_state.step1_results
         
         st.markdown("#### パレートフロント（2D）")
+        
+        # 日本語フォント設定
+        plt.rcParams['font.sans-serif'] = ['Hiragino Sans', 'Yu Gothic', 'Meiryo', 'DejaVu Sans']
+        plt.rcParams['axes.unicode_minus'] = False
         
         # 散布図
         fig, ax = plt.subplots(figsize=(10, 6))
@@ -2224,31 +2285,78 @@ def tab8_dsm_optimization():
         - **目的3**: ループ困難度最小化（閉路の累積影響）
         """)
         
+        # 軽量モード（STEP-2）
+        lightweight_mode_s2 = st.checkbox(
+            "⚡ 軽量モード（推奨）",
+            value=True,
+            help="個体数と世代数を削減し、サーバークラッシュを防ぎます",
+            key="lightweight_s2"
+        )
+        
+        if lightweight_mode_s2:
+            default_pop_s2, default_gen_s2 = 100, 30
+        else:
+            default_pop_s2, default_gen_s2 = 200, 50
+        
         col_p3, col_p4 = st.columns(2)
         with col_p3:
-            step2_pop = st.slider("個体数", 50, 500, 200, 50, key="step2_pop")
+            step2_pop = st.slider("個体数", 50, 500, default_pop_s2, 50, key="step2_pop")
         with col_p4:
-            step2_gen = st.slider("世代数", 20, 200, 50, 10, key="step2_gen")
+            step2_gen = st.slider("世代数", 20, 200, default_gen_s2, 10, key="step2_gen")
         
         if st.button("🚀 STEP-2を実行", type="primary", use_container_width=True):
-            with st.spinner(f"NSGA-II最適化中（{step2_gen}世代）..."):
+            from utils.dsm_optimizer import PIMStep2NSGA2
+            import time
+            
+            progress_placeholder = st.empty()
+            status_placeholder = st.empty()
+            
+            # 初期メッセージ
+            status_placeholder.info(f"🚀 NSGA-II最適化を開始しました（{step2_pop}個体 × {step2_gen}世代）...")
+            
+            with st.spinner("最適化実行中... 進捗は下のプログレスバーで確認できます"):
                 try:
-                    from utils.dsm_optimizer import PIMStep2NSGA2
-                    import time
-                    
                     start_time = time.time()
+                    gen_times = []
                     
                     dsm_data = st.session_state.dsm_data
                     selected = st.session_state.step1_results[st.session_state.step1_selected_idx]
                     removed_indices = [i for i, val in enumerate(selected['individual']) if val == 1]
                     
-                    # STEP-2実行
+                    # 進捗コールバック
+                    def progress_callback(gen: int, pareto_size: int):
+                        progress_pct = gen / step2_gen
+                        
+                        # 推定残り時間計算
+                        if gen > 0:
+                            elapsed = time.time() - start_time
+                            avg_time_per_gen = elapsed / gen
+                            remaining_gens = step2_gen - gen
+                            eta_seconds = avg_time_per_gen * remaining_gens
+                            eta_min = int(eta_seconds // 60)
+                            eta_sec = int(eta_seconds % 60)
+                            eta_text = f" | 推定残り時間: {eta_min}分{eta_sec}秒"
+                        else:
+                            eta_text = ""
+                        
+                        progress_placeholder.progress(
+                            progress_pct,
+                            text=f"世代 {gen}/{step2_gen} (パレート解: {pareto_size}個){eta_text}"
+                        )
+                    
+                    # STEP-2実行（同期）
                     step2 = PIMStep2NSGA2(dsm_data, removed_indices)
-                    pareto_front = step2.run(n_pop=step2_pop, n_gen=step2_gen)
+                    pareto_front = step2.run(
+                        n_pop=step2_pop,
+                        n_gen=step2_gen,
+                        checkpoint_id=None,
+                        save_every=1,
+                        progress_callback=progress_callback
+                    )
                     
                     elapsed = time.time() - start_time
                     
-                    # パレートフロントのデータを抽出
+                    # 結果をリスト化
                     step2_results = []
                     for ind in pareto_front:
                         adj, conf, loop = ind.fitness.values
@@ -2262,20 +2370,26 @@ def tab8_dsm_optimization():
                     st.session_state.step2_results = step2_results
                     st.session_state.step2_package = step2.pkg
                     
-                    st.success(f"✅ STEP-2完了: {len(pareto_front)}個のパレート解を発見（{elapsed:.1f}秒）")
+                    progress_placeholder.empty()
+                    elapsed_min = int(elapsed // 60)
+                    elapsed_sec = int(elapsed % 60)
+                    status_placeholder.success(f"✅ STEP-2完了: {len(pareto_front)}個のパレート解を発見（{elapsed_min}分{elapsed_sec}秒）")
                     
                 except Exception as e:
-                    st.error(f"❌ エラー: {str(e)}")
-                    st.code(str(e), language="python")
+                    progress_placeholder.empty()
+                    status_placeholder.error(f"❌ エラー: {str(e)}")
                     import traceback
                     st.code(traceback.format_exc(), language="python")
-                    return
         
         # STEP-2結果の可視化
         if "step2_results" in st.session_state and st.session_state.step2_results:
             results2 = st.session_state.step2_results
             
             st.markdown("#### パレートフロント（3D）")
+            
+            # 日本語フォント設定
+            plt.rcParams['font.sans-serif'] = ['Hiragino Sans', 'Yu Gothic', 'Meiryo', 'DejaVu Sans']
+            plt.rcParams['axes.unicode_minus'] = False
             
             # 3D散布図
             from mpl_toolkits.mplot3d import Axes3D
@@ -2341,6 +2455,11 @@ def tab8_dsm_optimization():
                     )
                     
                     fig, ax = plt.subplots(figsize=(12, 10))
+                    
+                    # 日本語フォント設定
+                    plt.rcParams['font.sans-serif'] = ['Hiragino Sans', 'Yu Gothic', 'Meiryo', 'DejaVu Sans']
+                    plt.rcParams['axes.unicode_minus'] = False
+                    
                     sns.heatmap(
                         df_optimized,
                         annot=True,
@@ -2362,8 +2481,1760 @@ def tab8_dsm_optimization():
                 st.session_state.step2_selected_idx = selected_idx2
                 st.session_state.optimized_dsm = selected2['matrix']
     
+    # 8.4 STEP-3: パーティショニングとモジュール化
+    if "step2_selected_idx" in st.session_state and "optimized_dsm" in st.session_state:
+        st.markdown("---")
+        st.subheader("8.4. STEP-3: パーティショニングとモジュール化")
+        
+        with st.expander("💡 この分析について", expanded=True):
+            st.markdown("""
+            **何がわかるか:**
+            - どの要素をグループ化すべきか（モジュール検出）
+            - どの順番で設計すべきか（デザインシーケンス）
+            - どこで手戻りが発生するか（フィードバックループ）
+            
+            **どう使えばいいか:**
+            - チーム編成の参考にする（モジュール単位で分担）
+            - 作業順序を決定する（デザインシーケンスに従う）
+            - 手戻りを事前に認識する（イテレーション箇所の特定）
+            
+            **結果の見方:**
+            - モジュール: 密に結合したノード群
+            - デザインシーケンス: 依存関係に基づく最適な設計順序
+            - フィードバック比率: 手戻りの度合い（低いほど良い）
+            """)
+        
+        st.info("⏱️ 推定計算時間: <1分")
+        
+        with st.expander("⚙️ 詳細設定", expanded=False):
+            n_modules = st.slider(
+                "モジュール数",
+                min_value=2,
+                max_value=min(10, len(st.session_state.optimized_dsm) // 2),
+                value=None,
+                help="Noneの場合は自動決定（√(N/2)個）"
+            )
+        
+        if st.button("🚀 パーティショニングを実行", type="primary", use_container_width=True):
+            with st.spinner("分析中..."):
+                try:
+                    from utils.dsm_partitioning import DSMPartitioner
+                    import time
+                    
+                    start_time = time.time()
+                    
+                    optimized_matrix = st.session_state.optimized_dsm
+                    pkg = st.session_state.step2_package
+                    node_names = [pkg['node_name'][0][i] for i in range(pkg['matrix_size'])]
+                    
+                    partitioner = DSMPartitioner(optimized_matrix, node_names)
+                    
+                    analysis_result = partitioner.full_analysis(n_clusters=n_modules)
+                    
+                    st.session_state.partitioning_result = analysis_result
+                    
+                    elapsed = time.time() - start_time
+                    
+                    st.success(f"✅ パーティショニング完了（{elapsed:.2f}秒）")
+                    
+                except Exception as e:
+                    st.error(f"❌ エラー: {str(e)}")
+                    import traceback
+                    st.code(traceback.format_exc(), language="python")
+                    return
+        
+        if "partitioning_result" in st.session_state:
+            result = st.session_state.partitioning_result
+            
+            st.markdown("### 分析結果")
+            
+            # 8.4.1 モジュール情報
+            with st.expander("📦 モジュール情報", expanded=True):
+                col_m1, col_m2, col_m3 = st.columns(3)
+                with col_m1:
+                    st.metric("モジュール数", result['modules']['n_modules'])
+                with col_m2:
+                    st.metric("モジュラリティスコア", f"{result['modularity_score']:.3f}",
+                             help="高いほど良いモジュール分割（-1～1）")
+                with col_m3:
+                    st.metric("フィードバック比率", f"{result['feedback_loops']['feedback_ratio']:.1%}",
+                             help="低いほど手戻りが少ない")
+                
+                st.markdown("**各モジュールのメンバー:**")
+                for module_id, members in result['module_members'].items():
+                    with st.expander(f"モジュール{module_id}（{len(members)}ノード）"):
+                        for member in members:
+                            st.caption(f"- {member}")
+            
+            # 8.4.2 デザインシーケンス
+            with st.expander("📋 デザインシーケンス（設計順序）", expanded=True):
+                st.markdown("**推奨される設計順序:**")
+                sequence_nodes = result['design_sequence']['reordered_nodes']
+                for i, node in enumerate(sequence_nodes, 1):
+                    st.caption(f"{i}. {node}")
+            
+            # 8.4.3 フィードバックループ
+            with st.expander("🔁 フィードバックループ（手戻り箇所）", expanded=True):
+                col_f1, col_f2, col_f3 = st.columns(3)
+                with col_f1:
+                    st.metric("フィードフォワード", result['feedback_loops']['feedforward_count'])
+                with col_f2:
+                    st.metric("フィードバック（手戻り）", result['feedback_loops']['feedback_count'])
+                with col_f3:
+                    st.metric("対角要素", result['feedback_loops']['diagonal_count'])
+                
+                if result['feedback_loops']['feedback_elements']:
+                    st.markdown("**手戻りが発生する箇所:**")
+                    feedback_df = pd.DataFrame([
+                        {
+                            "From": elem['from'],
+                            "To": elem['to'],
+                            "影響スコア": elem['value']
+                        }
+                        for elem in result['feedback_loops']['feedback_elements'][:20]
+                    ])
+                    st.dataframe(feedback_df, use_container_width=True, hide_index=True)
+                else:
+                    st.success("✅ 手戻りがありません（理想的な設計順序）")
+            
+            # 8.4.4 パーティショニング済みDSMヒートマップ
+            with st.expander("📊 パーティショニング済みDSMヒートマップ", expanded=True):
+                reordered_matrix = result['design_sequence']['reordered_matrix']
+                reordered_nodes = result['design_sequence']['reordered_nodes']
+                
+                df_partitioned = pd.DataFrame(
+                    reordered_matrix,
+                    index=reordered_nodes,
+                    columns=reordered_nodes
+                )
+                
+                fig, ax = plt.subplots(figsize=(14, 12))
+                
+                plt.rcParams['font.sans-serif'] = ['Hiragino Sans', 'Yu Gothic', 'Meiryo', 'DejaVu Sans']
+                plt.rcParams['axes.unicode_minus'] = False
+                
+                sns.heatmap(
+                    df_partitioned,
+                    annot=True,
+                    fmt='.0f',
+                    cmap='coolwarm',
+                    center=0,
+                    vmin=-9,
+                    vmax=9,
+                    linewidths=0.5,
+                    cbar_kws={'label': '影響スコア'},
+                    ax=ax
+                )
+                ax.set_title('パーティショニング済みDSM（デザインシーケンス順）', fontsize=14, pad=20)
+                ax.set_xlabel('To Node (影響を受ける)', fontsize=12)
+                ax.set_ylabel('From Node (影響を与える)', fontsize=12)
+                
+                st.pyplot(fig)
+                plt.close()
+    
     else:
         st.info("👆 まずSTEP-1を実行してください")
+
+
+def tab9_advanced_analytics():
+    """タブ9: 高度な分析（ステップ9）"""
+    st.header("🧬 ステップ9: 高度な分析")
+    
+    adj_matrix_df = st.session_state.get("adj_matrix_df")
+    nodes = SessionManager.get_nodes()
+    all_idef0 = SessionManager.get_all_idef0_nodes()
+    
+    if adj_matrix_df is None or nodes is None or len(nodes) < 2:
+        st.warning("⚠️ 先にタブ5で隣接行列を生成してください")
+        return
+    
+    st.markdown("""
+    データ分析の専門知識がなくても使える高度な分析ツールです。
+    各手法で「何がわかるか」「どう使えばいいか」を平易に説明します。
+    
+    **7つの分析手法:**
+    1. 協力貢献度分析（Shapley Value）
+    2. 情報フロー分析（Transfer Entropy）
+    3. 統計的検定（Bootstrap法）
+    4. 不確実性定量化（Bayesian Inference）
+    5. 因果推論（Pearl's Causal Inference）
+    6. 潜在構造発見（Graph Embedding）
+    7. 感度分析（Fisher Information）
+    """)
+    
+    st.info("💡 各分析には計算時間の見積もりが表示されます。興味のある分析から順に実行してください。")
+    
+    # 9.1 Shapley Value
+    st.markdown("---")
+    st.subheader("9.1. 協力貢献度分析（Shapley Value）⭐ 推奨")
+    
+    with st.expander("💡 この分析について", expanded=False):
+        st.markdown("""
+        **何がわかるか:**
+        
+        各ノードの「真の貢献度」を公平に評価します。
+        「このノードを削除したら全体性能がどれだけ下がるか」を数値化します。
+        
+        **どう使えばいいか:**
+        - 投資優先順位の決定（貢献度が高い工程を優先改善）
+        - 見えにくい「縁の下の力持ち」の発見
+        - リソース配分の根拠作成
+        
+        **結果の見方:**
+        - Shapley値が高い = 全体への貢献が大きい
+        - 上位10ノードを重点管理対象とする
+        - 負の値 = 削除すると全体が改善する可能性（要再検討）
+        """)
+    
+    st.info(f"⏱️ 推定計算時間: 2-5分（{len(nodes)}ノード、サンプル数1000）")
+    
+    col_settings, col_execute = st.columns([2, 1])
+    
+    with col_settings:
+        n_samples = st.slider(
+            "サンプル数",
+            min_value=100,
+            max_value=5000,
+            value=1000,
+            step=100,
+            help="多いほど精度向上、計算時間増加"
+        )
+        
+        value_function = st.selectbox(
+            "価値関数",
+            options=["pagerank_sum", "efficiency", "connectivity"],
+            format_func=lambda x: {
+                "pagerank_sum": "PageRank合計（推奨）",
+                "efficiency": "ネットワーク効率性",
+                "connectivity": "接続性"
+            }[x],
+            help="ネットワークの価値をどう評価するか"
+        )
+    
+    with col_execute:
+        st.write("")
+        st.write("")
+        execute_shapley = st.button("🚀 分析実行", key="shapley_btn", type="primary", use_container_width=True)
+    
+    if execute_shapley:
+        try:
+            with st.spinner("Shapley Value計算中..."):
+                from utils.shapley_analysis import ShapleyAnalyzer
+                from utils.analytics_progress import AnalyticsProgressTracker, create_simple_callback
+                
+                # 進捗トラッカーを初期化
+                tracker = AnalyticsProgressTracker("Shapley Value分析", total_steps=n_samples)
+                
+                # ノードカテゴリマッピング
+                categories_list = SessionManager.get_functional_categories()
+                all_idef0 = SessionManager.get_all_idef0_nodes()
+                node_categories = {}
+                for category in categories_list:
+                    if category in all_idef0:
+                        idef0_dict = all_idef0[category]
+                        for node_type in ['outputs', 'mechanisms', 'inputs']:
+                            if node_type in idef0_dict:
+                                for node_name in idef0_dict[node_type]:
+                                    node_categories[node_name] = category
+                
+                # Shapley分析実行
+                analyzer = ShapleyAnalyzer(
+                    adjacency_matrix=st.session_state.adjacency_matrix,
+                    node_names=nodes,
+                    node_categories=node_categories,
+                    value_function=value_function
+                )
+                
+                # シンプルコールバックを生成
+                progress_callback = create_simple_callback(tracker)
+                
+                result = analyzer.compute_shapley_values(
+                    n_samples=n_samples,
+                    progress_callback=progress_callback
+                )
+                
+                # 結果を保存
+                if "advanced_analytics_results" not in st.session_state:
+                    st.session_state.advanced_analytics_results = {}
+                
+                st.session_state.advanced_analytics_results["shapley"] = {
+                    "result": result,
+                    "parameters": {
+                        "n_samples": n_samples,
+                        "value_function": value_function
+                    },
+                    "timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+                
+                # 完了処理
+                tracker.complete(result.computation_time)
+        except Exception as e:
+            if 'tracker' in locals():
+                tracker.error(str(e))
+            st.error(f"❌ Shapley Value分析エラー: {str(e)}")
+            with st.expander("🔍 エラー詳細"):
+                import traceback
+                st.code(traceback.format_exc(), language="python")
+    
+    # 結果表示
+    if "advanced_analytics_results" in st.session_state and "shapley" in st.session_state.advanced_analytics_results:
+        result_data = st.session_state.advanced_analytics_results["shapley"]
+        result = result_data["result"]
+        
+        st.markdown("---")
+        st.subheader("📊 分析結果")
+        
+        # 解釈文
+        with st.expander("💡 結果の解釈", expanded=True):
+            st.markdown(result.interpretation)
+        
+        # メトリクス
+        col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+        with col_m1:
+            st.metric("総ノード数", len(result.shapley_values))
+        with col_m2:
+            st.metric("全体価値", f"{result.total_value:.4f}")
+        with col_m3:
+            st.metric("計算時間", f"{result.computation_time:.1f}秒")
+        with col_m4:
+            top_value = result.top_contributors[0][1] if result.top_contributors else 0
+            st.metric("最大貢献度", f"{top_value:.4f}")
+        
+        # 上位貢献者表
+        st.markdown("### 🏆 貢献度ランキング（上位20）")
+        top_20 = result.top_contributors[:20]
+        df_top = pd.DataFrame([
+            {
+                "順位": i+1,
+                "ノード名": name,
+                "Shapley値": value,
+                "貢献率%": (value / result.total_value * 100) if result.total_value > 0 else 0
+            }
+            for i, (name, value) in enumerate(top_20)
+        ])
+        st.dataframe(df_top, use_container_width=True, hide_index=True)
+        
+        # 可視化
+        import matplotlib.pyplot as plt
+        # 日本語フォント設定
+        plt.rcParams['font.sans-serif'] = ['Hiragino Sans', 'Yu Gothic', 'Meiryo', 'DejaVu Sans']
+        plt.rcParams['axes.unicode_minus'] = False
+        
+        col_viz1, col_viz2 = st.columns(2)
+        
+        with col_viz1:
+            st.markdown("### 📊 貢献度分布（上位15）")
+            top_15 = result.top_contributors[:15]
+            
+            fig, ax = plt.subplots(figsize=(8, 6))
+            names = [name for name, _ in top_15]
+            values = [value for _, value in top_15]
+            
+            colors = ['#2ecc71' if v > 0 else '#e74c3c' for v in values]
+            ax.barh(range(len(names)), values, color=colors, alpha=0.8)
+            ax.set_yticks(range(len(names)))
+            ax.set_yticklabels(names)
+            ax.set_xlabel('Shapley Value')
+            ax.set_title('Top 15 Contributors')
+            ax.invert_yaxis()
+            ax.grid(axis='x', alpha=0.3)
+            
+            st.pyplot(fig)
+            plt.close()
+        
+        with col_viz2:
+            st.markdown("### 📈 累積貢献度")
+            
+            fig, ax = plt.subplots(figsize=(8, 6))
+            x = [n for n, _ in result.cumulative_contribution]
+            y = [pct for _, pct in result.cumulative_contribution]
+            
+            ax.plot(x, y, marker='o', linewidth=2, markersize=4, color='#3498db')
+            ax.axhline(y=80, color='red', linestyle='--', alpha=0.7, label='80%ライン')
+            ax.set_xlabel('Top N Nodes')
+            ax.set_ylabel('Cumulative Contribution (%)')
+            ax.set_title('Cumulative Contribution Curve')
+            ax.legend()
+            ax.grid(alpha=0.3)
+            
+            st.pyplot(fig)
+            plt.close()
+        
+        # カテゴリ別貢献度
+        if result.category_contributions:
+            st.markdown("### 📦 カテゴリ別平均貢献度")
+            df_cat = pd.DataFrame([
+                {"カテゴリ": cat, "平均Shapley値": value}
+                for cat, value in sorted(result.category_contributions.items(), key=lambda x: x[1], reverse=True)
+            ])
+            st.dataframe(df_cat, use_container_width=True, hide_index=True)
+        
+        # 7. 連携安定性分析
+        st.markdown("### 🔗 連携安定性分析")
+        st.markdown("""
+        **目的:** Shapley値上位ノード同士を連携させることで、相乗効果を最大化
+        
+        上位25%のノード間の接続強度を分析し、密結合ペアを特定。
+        これらの連携を強化することで、全体性能の向上が期待できます。
+        """)
+        
+        if st.button("🔗 連携安定性を分析", key="coalition_stability_btn"):
+            with st.spinner("連携安定性を計算中..."):
+                from utils.shapley_analysis import compute_shapley_coalition_stability
+                
+                stability_result = compute_shapley_coalition_stability(
+                    shapley_values=result.shapley_values,
+                    adjacency_matrix=st.session_state.adjacency_matrix,
+                    node_names=nodes
+                )
+                
+                # セッションステートに保存
+                st.session_state.advanced_analytics_results["shapley"]["stability"] = stability_result
+                
+                st.success(f"✅ 連携安定性分析完了（上位{len(stability_result['top_contributors'])}ノード分析）")
+        
+        # 結果表示
+        if "stability" in st.session_state.advanced_analytics_results["shapley"]:
+            stability_result = st.session_state.advanced_analytics_results["shapley"]["stability"]
+            
+            # 推奨メッセージ
+            st.info(stability_result["recommendation"])
+            
+            col_stab1, col_stab2 = st.columns([1, 1])
+            
+            with col_stab1:
+                st.markdown("#### 🏆 上位貢献者（Top 25%）")
+                top_nodes = stability_result["top_contributors"]
+                
+                # データフレーム
+                df_top_nodes = pd.DataFrame([
+                    {
+                        "順位": i+1,
+                        "ノード名": node,
+                        "Shapley値": result.shapley_values[node]
+                    }
+                    for i, node in enumerate(top_nodes)
+                ])
+                st.dataframe(df_top_nodes, use_container_width=True, hide_index=True)
+            
+            with col_stab2:
+                st.markdown("#### 🤝 密結合ペア（Top 10）")
+                dense_connections = stability_result["dense_connections"]
+                
+                if dense_connections:
+                    df_dense = pd.DataFrame([
+                        {
+                            "順位": i+1,
+                            "ノード1": node1,
+                            "ノード2": node2,
+                            "接続強度": strength
+                        }
+                        for i, (node1, node2, strength) in enumerate(dense_connections)
+                    ])
+                    st.dataframe(df_dense, use_container_width=True, hide_index=True)
+                else:
+                    st.warning("上位ノード間に接続がありません（疎なネットワーク）")
+            
+            # ネットワーク図可視化
+            if dense_connections:
+                st.markdown("#### 🌐 連携ネットワーク図")
+                
+                import networkx as nx
+                
+                fig, ax = plt.subplots(figsize=(12, 8))
+                
+                # グラフ構築
+                G = nx.Graph()
+                
+                # 上位ノードを追加
+                top_nodes = stability_result["top_contributors"]
+                for node in top_nodes:
+                    G.add_node(node, shapley=result.shapley_values[node])
+                
+                # 密結合エッジを追加
+                for node1, node2, strength in dense_connections:
+                    G.add_edge(node1, node2, weight=strength)
+                
+                # レイアウト計算（spring layout）
+                pos = nx.spring_layout(G, k=2, iterations=50, seed=42)
+                
+                # ノードサイズ（Shapley値に比例）
+                node_sizes = [result.shapley_values[node] * 3000 for node in G.nodes()]
+                
+                # ノード色（Shapley値でグラデーション）
+                shapley_vals = [result.shapley_values[node] for node in G.nodes()]
+                
+                # エッジ幅（接続強度に比例）
+                edge_widths = [G[u][v]['weight'] * 0.5 for u, v in G.edges()]
+                
+                # 描画
+                nx.draw_networkx_nodes(
+                    G, pos, 
+                    node_size=node_sizes,
+                    node_color=shapley_vals,
+                    cmap=plt.cm.YlGnBu,
+                    alpha=0.8,
+                    ax=ax
+                )
+                
+                nx.draw_networkx_edges(
+                    G, pos,
+                    width=edge_widths,
+                    alpha=0.6,
+                    edge_color='gray',
+                    ax=ax
+                )
+                
+                nx.draw_networkx_labels(
+                    G, pos,
+                    font_size=9,
+                    font_weight='bold',
+                    ax=ax
+                )
+                
+                ax.set_title('Coalition Stability Network (Top Contributors)', fontsize=14, fontweight='bold')
+                ax.axis('off')
+                
+                # カラーバー
+                sm = plt.cm.ScalarMappable(
+                    cmap=plt.cm.YlGnBu,
+                    norm=plt.Normalize(vmin=min(shapley_vals), vmax=max(shapley_vals))
+                )
+                sm.set_array([])
+                cbar = plt.colorbar(sm, ax=ax, fraction=0.046, pad=0.04)
+                cbar.set_label('Shapley Value', rotation=270, labelpad=20)
+                
+                st.pyplot(fig)
+                plt.close()
+    
+    # 9.2 Transfer Entropy
+    st.markdown("---")
+    st.subheader("9.2. 情報フロー分析（Transfer Entropy）⭐ 推奨")
+    
+    with st.expander("💡 この分析について", expanded=False):
+        st.markdown("""
+        **何がわかるか:**
+        
+        「誰が誰に何bit情報を伝えているか」を定量化します。
+        単なる相関ではなく、因果的な情報の流れを検出します。
+        
+        **どう使えばいいか:**
+        - 真のボトルネックの特定（情報が集中・遮断される箇所）
+        - 間接的な影響経路の発見
+        - コミュニケーション設計の改善
+        
+        **結果の見方:**
+        - Transfer Entropy が高い = 強い因果的影響
+        - 0に近い = 見かけの相関のみ（実際には影響していない）
+        """)
+    
+    st.info(f"⏱️ 推定計算時間: 1-3分（{len(nodes)}ノード）")
+    
+    col_settings_te, col_execute_te = st.columns([2, 1])
+    
+    with col_settings_te:
+        n_walks = st.slider(
+            "ランダムウォーク回数",
+            min_value=500,
+            max_value=5000,
+            value=1000,
+            step=100,
+            help="多いほど精度向上、計算時間増加"
+        )
+        
+        walk_length = st.slider(
+            "ウォーク長",
+            min_value=20,
+            max_value=100,
+            value=50,
+            step=10,
+            help="時系列の長さ"
+        )
+        
+        n_bins = st.slider(
+            "離散化ビン数",
+            min_value=2,
+            max_value=5,
+            value=3,
+            step=1,
+            help="低い=粗い分類、高い=細かい分類"
+        )
+    
+    with col_execute_te:
+        st.write("")
+        st.write("")
+        execute_te = st.button("🚀 分析実行", key="te_btn", type="primary", use_container_width=True)
+    
+    if execute_te:
+        try:
+            with st.spinner("Transfer Entropy計算中..."):
+                from utils.information_theory_analysis import TransferEntropyAnalyzer
+                from utils.analytics_progress import AnalyticsProgressTracker
+                
+                # 進捗トラッカーを初期化
+                tracker_te = AnalyticsProgressTracker("Transfer Entropy分析", total_steps=100)
+                
+                # progress_callbackを定義（message, pct形式）
+                def progress_callback_te(message, pct):
+                    tracker_te.update(int(pct * 100), message)
+                
+                analyzer_te = TransferEntropyAnalyzer(
+                    adjacency_matrix=st.session_state.adjacency_matrix,
+                    node_names=nodes,
+                    n_walks=n_walks,
+                    walk_length=walk_length,
+                    n_bins=n_bins
+                )
+                
+                result_te = analyzer_te.compute_transfer_entropy(
+                    progress_callback=progress_callback_te
+                )
+                
+                if "advanced_analytics_results" not in st.session_state:
+                    st.session_state.advanced_analytics_results = {}
+                
+                st.session_state.advanced_analytics_results["transfer_entropy"] = {
+                    "result": result_te,
+                    "parameters": {
+                        "n_walks": n_walks,
+                        "walk_length": walk_length,
+                        "n_bins": n_bins
+                    },
+                    "timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+                
+                # 完了処理
+                tracker_te.complete(result_te.computation_time)
+        except Exception as e:
+            if 'tracker_te' in locals():
+                tracker_te.error(str(e))
+            st.error(f"❌ Transfer Entropy分析エラー: {str(e)}")
+            with st.expander("🔍 エラー詳細"):
+                import traceback
+                st.code(traceback.format_exc(), language="python")
+    
+    if "advanced_analytics_results" in st.session_state and "transfer_entropy" in st.session_state.advanced_analytics_results:
+        result_data_te = st.session_state.advanced_analytics_results["transfer_entropy"]
+        result_te = result_data_te["result"]
+        
+        st.markdown("---")
+        st.subheader("📡 分析結果")
+        
+        with st.expander("💡 結果の解釈", expanded=True):
+            st.markdown(result_te.interpretation)
+        
+        col_m1_te, col_m2_te, col_m3_te, col_m4_te = st.columns(4)
+        with col_m1_te:
+            st.metric("総ノード数", len(nodes))
+        with col_m2_te:
+            avg_te = result_te.te_matrix[result_te.te_matrix > 0].mean() if (result_te.te_matrix > 0).any() else 0
+            st.metric("平均TE", f"{avg_te:.3f} bits")
+        with col_m3_te:
+            st.metric("計算時間", f"{result_te.computation_time:.1f}秒")
+        with col_m4_te:
+            st.metric("有意フロー数", len(result_te.significant_flows))
+        
+        st.markdown("### 🔝 有意な情報フロー（上位20）")
+        top_20_te = result_te.significant_flows[:20]
+        df_top_te = pd.DataFrame([
+            {
+                "順位": i+1,
+                "From": source,
+                "To": target,
+                "TE (bits)": te_value
+            }
+            for i, (source, target, te_value) in enumerate(top_20_te)
+        ])
+        st.dataframe(df_top_te, use_container_width=True, hide_index=True)
+        
+        import matplotlib.pyplot as plt
+        # 日本語フォント設定
+        plt.rcParams['font.sans-serif'] = ['Hiragino Sans', 'Yu Gothic', 'Meiryo', 'DejaVu Sans']
+        plt.rcParams['axes.unicode_minus'] = False
+        
+        col_viz1_te, col_viz2_te = st.columns(2)
+        
+        with col_viz1_te:
+            st.markdown("### 📊 TE行列ヒートマップ")
+            
+            fig, ax = plt.subplots(figsize=(10, 8))
+            sns.heatmap(result_te.te_matrix, ax=ax, cmap='Blues',
+                       xticklabels=nodes, yticklabels=nodes,
+                       cbar_kws={'label': 'Transfer Entropy (bits)'})
+            ax.set_title('Transfer Entropy Matrix')
+            ax.set_xlabel('To Node')
+            ax.set_ylabel('From Node')
+            
+            st.pyplot(fig)
+            plt.close()
+        
+        with col_viz2_te:
+            st.markdown("### 📈 情報流入/流出量")
+            
+            inflow_vals = [result_te.info_inflow.get(node, 0) for node in nodes[:15]]
+            outflow_vals = [result_te.info_outflow.get(node, 0) for node in nodes[:15]]
+            
+            fig, ax = plt.subplots(figsize=(10, 8))
+            x = np.arange(len(nodes[:15]))
+            width = 0.35
+            
+            ax.barh(x - width/2, inflow_vals, width, label='流入量', color='#3498db')
+            ax.barh(x + width/2, outflow_vals, width, label='流出量', color='#e74c3c')
+            
+            ax.set_yticks(x)
+            ax.set_yticklabels(nodes[:15])
+            ax.set_xlabel('Information Flow (bits)')
+            ax.set_title('Top 15 Nodes: Inflow/Outflow')
+            ax.legend()
+            ax.invert_yaxis()
+            
+            st.pyplot(fig)
+            plt.close()
+        
+        st.markdown("### 🔍 元の隣接行列との比較")
+        st.markdown("元の評価スコアと Transfer Entropy の差異を分析")
+        
+        comparison_filtered = result_te.comparison_with_original[
+            result_te.comparison_with_original["判定"] != "✅ 一致"
+        ].head(20)
+        
+        if len(comparison_filtered) > 0:
+            st.dataframe(comparison_filtered, use_container_width=True, hide_index=True)
+        else:
+            st.info("元の評価スコアとTransfer Entropyは概ね一致しています。")
+        
+        if result_te.bottleneck_nodes:
+            st.markdown("### 🚧 情報ボトルネックノード")
+            st.markdown("多くの情報が集中・経由する重要な中継点:")
+            for node in result_te.bottleneck_nodes:
+                st.markdown(f"- **{node}**")
+    
+    # 9.3 Bootstrap統計検定
+    st.markdown("---")
+    st.subheader("9.3. 統計的検定（Bootstrap法）")
+    
+    with st.expander("💡 この分析について", expanded=False):
+        st.markdown("""
+        **何がわかるか:**
+        
+        「この結果は偶然ではない」という統計的根拠を提供します。
+        全ての指標に信頼区間と有意性検定を適用します。
+        
+        **どう使えばいいか:**
+        - 分析結果の信頼性評価
+        - 経営層への説明資料（統計的根拠付き）
+        - 小規模データでも頑健な分析
+        
+        **結果の見方:**
+        - p値 < 0.05 = 統計的に有意（95%信頼）
+        - 信頼区間が0をまたがない = 有意な差がある
+        """)
+    
+    st.info(f"⏱️ 推定計算時間: 2-4分（リサンプル1000回）")
+    
+    col_settings_bs, col_execute_bs = st.columns([2, 1])
+    
+    with col_settings_bs:
+        n_bootstrap = st.slider(
+            "リサンプル回数",
+            min_value=100,
+            max_value=5000,
+            value=1000,
+            step=100,
+            help="多いほど精度向上、計算時間増加"
+        )
+        
+        alpha = st.slider(
+            "有意水準",
+            min_value=0.01,
+            max_value=0.10,
+            value=0.05,
+            step=0.01,
+            help="0.05 = 95%信頼区間"
+        )
+    
+    with col_execute_bs:
+        st.write("")
+        st.write("")
+        execute_bs = st.button("🚀 検定実行", key="bootstrap_btn", type="primary", use_container_width=True)
+    
+    if execute_bs:
+        try:
+            with st.spinner("Bootstrap統計検定中..."):
+                from utils.statistical_testing import BootstrapTester
+                from utils.analytics_progress import AnalyticsProgressTracker
+                
+                # 進捗トラッカーを初期化
+                tracker_bs = AnalyticsProgressTracker("Bootstrap統計検定", total_steps=100)
+                
+                # progress_callbackを定義（message, pct形式）
+                def progress_callback_bs(message, pct):
+                    tracker_bs.update(int(pct * 100), message)
+                
+                categories_list = SessionManager.get_functional_categories()
+                all_idef0 = SessionManager.get_all_idef0_nodes()
+                node_groups_bs = {}
+                for category in categories_list:
+                    if category in all_idef0:
+                        idef0_dict = all_idef0[category]
+                        for node_type in ['outputs', 'mechanisms', 'inputs']:
+                            if node_type in idef0_dict:
+                                for node_name in idef0_dict[node_type]:
+                                    node_groups_bs[node_name] = category
+                
+                tester = BootstrapTester(
+                    adjacency_matrix=st.session_state.adjacency_matrix,
+                    node_names=nodes,
+                    node_groups=node_groups_bs,
+                    n_bootstrap=n_bootstrap,
+                    alpha=alpha
+                )
+                
+                result_bs = tester.run_comprehensive_bootstrap_analysis(
+                    metric_name="PageRank",
+                    progress_callback=progress_callback_bs
+                )
+                
+                if "advanced_analytics_results" not in st.session_state:
+                    st.session_state.advanced_analytics_results = {}
+                
+                st.session_state.advanced_analytics_results["bootstrap"] = {
+                    "result": result_bs,
+                    "parameters": {
+                        "n_bootstrap": n_bootstrap,
+                        "alpha": alpha
+                    },
+                    "timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+                
+                # 完了処理
+                tracker_bs.complete(result_bs.computation_time)
+        except Exception as e:
+            if 'tracker_bs' in locals():
+                tracker_bs.error(str(e))
+            st.error(f"❌ Bootstrap統計検定エラー: {str(e)}")
+            with st.expander("🔍 エラー詳細"):
+                import traceback
+                st.code(traceback.format_exc(), language="python")
+    
+    if "advanced_analytics_results" in st.session_state and "bootstrap" in st.session_state.advanced_analytics_results:
+        result_data_bs = st.session_state.advanced_analytics_results["bootstrap"]
+        result_bs = result_data_bs["result"]
+        
+        st.markdown("---")
+        st.subheader("📋 検定結果")
+        
+        with st.expander("💡 結果の解釈", expanded=True):
+            st.markdown(result_bs.interpretation)
+        
+        col_m1_bs, col_m2_bs, col_m3_bs, col_m4_bs = st.columns(4)
+        with col_m1_bs:
+            st.metric("総ノード数", len(result_bs.node_ci))
+        with col_m2_bs:
+            st.metric("安定", len(result_bs.stable_findings))
+        with col_m3_bs:
+            st.metric("不安定", len(result_bs.unstable_findings))
+        with col_m4_bs:
+            st.metric("リサンプル数", result_bs.n_bootstrap)
+        
+        st.markdown(f"### 📊 {result_bs.metric_name}の信頼区間（上位15）")
+        
+        top_15_ci = sorted(result_bs.node_ci.items(), key=lambda x: x[1][0], reverse=True)[:15]
+        
+        df_ci = pd.DataFrame([
+            {
+                "順位": i+1,
+                "ノード名": node,
+                "値": ci[0],
+                "下限": ci[1],
+                "上限": ci[2],
+                "相対誤差%": ((ci[2] - ci[1]) / (2 * abs(ci[0])) * 100) if abs(ci[0]) > 1e-6 else 0
+            }
+            for i, (node, ci) in enumerate(top_15_ci)
+        ])
+        st.dataframe(df_ci, use_container_width=True, hide_index=True)
+        
+        import matplotlib.pyplot as plt
+        # 日本語フォント設定
+        plt.rcParams['font.sans-serif'] = ['Hiragino Sans', 'Yu Gothic', 'Meiryo', 'DejaVu Sans']
+        plt.rcParams['axes.unicode_minus'] = False
+        
+        col_viz1_bs, col_viz2_bs = st.columns(2)
+        
+        with col_viz1_bs:
+            st.markdown("📊 エラーバー付き棒グラフ")
+            
+            fig, ax = plt.subplots(figsize=(10, 8))
+            
+            names = [node for node, _ in top_15_ci]
+            values = [ci[0] for _, ci in top_15_ci]
+            lower_errors = [ci[0] - ci[1] for _, ci in top_15_ci]
+            upper_errors = [ci[2] - ci[0] for _, ci in top_15_ci]
+            
+            ax.barh(range(len(names)), values, 
+                   xerr=[lower_errors, upper_errors],
+                   capsize=5, alpha=0.8, color='#3498db')
+            ax.set_yticks(range(len(names)))
+            ax.set_yticklabels(names)
+            ax.set_xlabel(f'{result_bs.metric_name} ({(1-result_bs.alpha)*100:.0f}% CI)')
+            ax.set_title(f'Top 15 {result_bs.metric_name} with Confidence Intervals')
+            ax.invert_yaxis()
+            ax.grid(axis='x', alpha=0.3)
+            
+            st.pyplot(fig)
+            plt.close()
+        
+        with col_viz2_bs:
+            st.markdown("📉 安定性スコア")
+            
+            from utils.statistical_testing import compute_stability_score
+            stability_df = compute_stability_score(result_bs.node_ci)
+            
+            top_20_stability = stability_df.head(20)
+            
+            fig, ax = plt.subplots(figsize=(10, 8))
+            
+            rel_errors = top_20_stability["相対誤差"].values
+            node_names_stab = top_20_stability["ノード名"].values
+            judgments = top_20_stability["判定"].values
+            
+            colors = ['green' if '安定' in j else 'orange' if 'やや' in j else 'red' for j in judgments]
+            
+            ax.barh(range(len(node_names_stab)), rel_errors, color=colors, alpha=0.8)
+            ax.axvline(0.2, color='green', linestyle='--', linewidth=2, label='安定(<20%)')
+            ax.axvline(0.5, color='orange', linestyle='--', linewidth=2, label='やや不安定(<50%)')
+            ax.set_yticks(range(len(node_names_stab)))
+            ax.set_yticklabels(node_names_stab)
+            ax.set_xlabel('Relative Error')
+            ax.set_title('Stability Assessment (lower=more stable)')
+            ax.legend()
+            ax.invert_yaxis()
+            
+            st.pyplot(fig)
+            plt.close()
+        
+        if len(result_bs.group_comparison) > 0:
+            st.markdown("### 🔍 グループ間比較（Permutation検定）")
+            st.dataframe(result_bs.group_comparison, use_container_width=True, hide_index=True)
+            
+            significant = result_bs.group_comparison[result_bs.group_comparison["有意性"] == "✅ 有意"]
+            if len(significant) > 0:
+                st.success(f"✅ {len(significant)}組のペアで統計的に有意な差が検出されました（p<{result_bs.alpha}）")
+            else:
+                st.info("グループ間に統計的に有意な差は検出されませんでした。")
+    
+    # 9.4 Bayesian Inference
+    st.markdown("---")
+    st.subheader("9.4. 不確実性定量化（Bayesian Inference）")
+    
+    with st.expander("💡 この分析について", expanded=False):
+        st.markdown("""
+        **何がわかるか:**
+        
+        LLM評価の「信頼性」を数値化します。
+        「このスコアは 3.5±0.8」のように不確実性を明示します。
+        
+        **どう使えばいいか:**
+        - 再評価が必要なノードの特定（信頼区間が広い箇所）
+        - 意思決定のリスク評価
+        - 不確実性を考慮したシナリオ分析
+        
+        **結果の見方:**
+        - 信頼区間が狭い = 評価が安定している
+        - 信頼区間が広い = 再評価推奨
+        
+        **技術背景:**
+        Bootstrap-based Bayesian Approximation（簡易版）を使用。
+        共役事前分布により解析的に事後分布を計算（MCMC不要）。
+        """)
+    
+    st.info(f"⏱️ 推定計算時間: 1-2分（Bootstrap {len(nodes)}ノード）")
+    
+    col_settings_bi, col_execute_bi = st.columns([2, 1])
+    
+    with col_settings_bi:
+        st.markdown("**パラメータ設定**")
+        
+        col_param1_bi, col_param2_bi = st.columns(2)
+        
+        with col_param1_bi:
+            n_bootstrap_bi = st.slider(
+                "Bootstrapサンプル数",
+                min_value=500,
+                max_value=2000,
+                value=1000,
+                step=100,
+                help="多いほど精度向上（計算時間増加）"
+            )
+        
+        with col_param2_bi:
+            credible_level_str = st.selectbox(
+                "信用区間レベル",
+                ["90%", "95%", "99%"],
+                index=1,
+                help="95%推奨（真の値が区間内にある確率）"
+            )
+            credible_level_bi = float(credible_level_str.replace("%", "")) / 100.0
+    
+    with col_execute_bi:
+        st.markdown("**実行**")
+        if st.button("🚀 Bayesian推論を実行", key="bayesian_btn", use_container_width=True):
+            from utils.bayesian_analysis import BayesianAnalyzer
+            from utils.analytics_progress import AnalyticsProgressTracker
+            
+            tracker = AnalyticsProgressTracker("Bayesian Inference分析", total_steps=100)
+            
+            try:
+                analyzer = BayesianAnalyzer(
+                    adjacency_matrix=adjacency_matrix,
+                    node_names=nodes,
+                    n_bootstrap=n_bootstrap_bi,
+                    credible_level=credible_level_bi,
+                    prior_type='weak_informative'
+                )
+                
+                result_bi = analyzer.compute_bayesian_inference(
+                    progress_callback=tracker.update
+                )
+                
+                tracker.complete(result_bi.computation_time)
+                
+                if "advanced_analytics_results" not in st.session_state:
+                    st.session_state.advanced_analytics_results = {}
+                
+                st.session_state.advanced_analytics_results["bayesian_inference"] = {
+                    "result": result_bi,
+                    "parameters": {
+                        "n_bootstrap": n_bootstrap_bi,
+                        "credible_level": credible_level_bi,
+                        "prior_type": "weak_informative"
+                    },
+                    "timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+                
+                st.success(f"✅ Bayesian Inference分析完了！（{result_bi.computation_time:.1f}秒）")
+                st.rerun()
+            
+            except Exception as e:
+                tracker.error(str(e))
+                st.error(f"❌ エラー: {str(e)}")
+    
+    if "advanced_analytics_results" in st.session_state and "bayesian_inference" in st.session_state.advanced_analytics_results:
+        result_bi = st.session_state.advanced_analytics_results["bayesian_inference"]["result"]
+        
+        st.markdown("### 💡 結果の解釈")
+        st.markdown(result_bi.interpretation)
+        
+        st.markdown("---")
+        st.markdown("### 📊 分析メトリクス")
+        
+        col_metric1_bi, col_metric2_bi, col_metric3_bi, col_metric4_bi = st.columns(4)
+        
+        with col_metric1_bi:
+            st.metric("総エッジ数", result_bi.n_edges)
+        
+        with col_metric2_bi:
+            avg_uncertainty = np.mean(list(result_bi.uncertainty_scores.values())) if result_bi.uncertainty_scores else 0
+            st.metric("平均不確実性", f"{avg_uncertainty:.3f}")
+        
+        with col_metric3_bi:
+            n_high_uncertainty = sum(1 for score in result_bi.uncertainty_scores.values() if score > 0.5)
+            st.metric("高不確実性エッジ", n_high_uncertainty)
+        
+        with col_metric4_bi:
+            st.metric("計算時間", f"{result_bi.computation_time:.1f}秒")
+        
+        st.markdown("---")
+        st.markdown("### 📈 可視化")
+        
+        col_viz1_bi, col_viz2_bi = st.columns(2)
+        
+        with col_viz1_bi:
+            st.markdown("📊 不確実性ランキング（上位20エッジ）")
+            
+            import matplotlib.pyplot as plt
+            
+            plt.rcParams['font.sans-serif'] = ['Hiragino Sans', 'Yu Gothic', 'Meiryo', 'DejaVu Sans']
+            plt.rcParams['axes.unicode_minus'] = False
+            
+            top_20_uncertainty = result_bi.high_uncertainty_edges[:20]
+            
+            if top_20_uncertainty:
+                fig, ax = plt.subplots(figsize=(12, 8))
+                
+                edge_labels = [f"{s}→{t}" for s, t, _ in top_20_uncertainty]
+                uncertainty_values = [score for _, _, score in top_20_uncertainty]
+                
+                y_pos = np.arange(len(edge_labels))
+                
+                colors = ['red' if u > 0.7 else 'orange' if u > 0.5 else 'yellow' for u in uncertainty_values]
+                
+                ax.barh(y_pos, uncertainty_values, color=colors, alpha=0.7)
+                ax.set_yticks(y_pos)
+                ax.set_yticklabels(edge_labels)
+                ax.set_xlabel('Uncertainty Score')
+                ax.set_title('Top 20 High-Uncertainty Edges')
+                ax.axvline(0.5, color='orange', linestyle='--', linewidth=2, label='High (>0.5)')
+                ax.axvline(0.7, color='red', linestyle='--', linewidth=2, label='Very High (>0.7)')
+                ax.legend()
+                ax.invert_yaxis()
+                ax.grid(axis='x', alpha=0.3)
+                
+                st.pyplot(fig)
+                plt.close()
+        
+        with col_viz2_bi:
+            st.markdown("📋 信用区間テーブル（上位20エッジ）")
+            
+            credible_pct = int(result_bi.credible_level * 100)
+            
+            ci_data = []
+            for source, target, _ in result_bi.high_uncertainty_edges[:20]:
+                edge = (source, target)
+                if edge in result_bi.credible_intervals:
+                    mean_val, lower, upper = result_bi.credible_intervals[edge]
+                    uncertainty = result_bi.uncertainty_scores.get(edge, 0)
+                    
+                    if uncertainty > 0.7:
+                        status = "❌ 非常に不安定"
+                    elif uncertainty > 0.5:
+                        status = "⚠️ 不安定"
+                    elif uncertainty > 0.3:
+                        status = "⚡ やや不安定"
+                    else:
+                        status = "✅ 安定"
+                    
+                    ci_data.append({
+                        "From": source,
+                        "To": target,
+                        "事後平均": f"{mean_val:.2f}",
+                        f"下限{credible_pct}%": f"{lower:.2f}",
+                        f"上限{credible_pct}%": f"{upper:.2f}",
+                        "不確実性": f"{uncertainty:.3f}",
+                        "判定": status
+                    })
+            
+            ci_df = pd.DataFrame(ci_data)
+            st.dataframe(ci_df, use_container_width=True, hide_index=True)
+        
+        st.markdown("---")
+        st.markdown("### 📊 事後分布の可視化（上位10エッジ）")
+        
+        if len(result_bi.high_uncertainty_edges) > 0:
+            top_10_edges = result_bi.high_uncertainty_edges[:10]
+            
+            n_rows = (len(top_10_edges) + 1) // 2
+            fig, axes = plt.subplots(n_rows, 2, figsize=(14, 4 * n_rows))
+            
+            if n_rows == 1:
+                axes = axes.reshape(1, -1)
+            
+            for idx, (source, target, _) in enumerate(top_10_edges):
+                row = idx // 2
+                col = idx % 2
+                ax = axes[row, col]
+                
+                edge = (source, target)
+                if edge in result_bi.credible_intervals:
+                    mean_val, lower, upper = result_bi.credible_intervals[edge]
+                    std_val = result_bi.posterior_std.get(edge, 1.0)
+                    
+                    x = np.linspace(mean_val - 4*std_val, mean_val + 4*std_val, 200)
+                    y = stats.norm.pdf(x, mean_val, std_val)
+                    
+                    ax.plot(x, y, 'b-', linewidth=2, label='Posterior')
+                    ax.axvline(mean_val, color='green', linestyle='-', linewidth=2, label=f'Mean: {mean_val:.2f}')
+                    ax.axvline(lower, color='orange', linestyle='--', linewidth=1.5, label=f'CI: [{lower:.2f}, {upper:.2f}]')
+                    ax.axvline(upper, color='orange', linestyle='--', linewidth=1.5)
+                    ax.fill_between(x, y, where=(x >= lower) & (x <= upper), alpha=0.3, color='orange')
+                    
+                    ax.set_title(f"{source} → {target}")
+                    ax.set_xlabel("Score")
+                    ax.set_ylabel("Density")
+                    ax.legend(fontsize=8)
+                    ax.grid(alpha=0.3)
+            
+            for idx in range(len(top_10_edges), n_rows * 2):
+                row = idx // 2
+                col = idx % 2
+                fig.delaxes(axes[row, col])
+            
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close()
+    
+    # 9.5 Causal Inference
+    st.markdown("---")
+    st.subheader("9.5. 因果推論（Pearl's Causal Inference）")
+    
+    with st.expander("💡 この分析について", expanded=False):
+        st.markdown("""
+        **何がわかるか:**
+        
+        「もしこのノードを改善したら、全体がどう変わるか」を予測します。
+        相関ではなく因果関係を推定します。
+        
+        **どう使えばいいか:**
+        - プロセス改善のシミュレーション
+        - 投資効果の事前予測
+        - 反事実分析（「もしあの時...」）
+        - 因果経路の可視化
+        - 交絡因子の検出
+        
+        **結果の見方:**
+        - 介入効果: do(X=改善) → Y が 15%向上
+        - 直接効果 vs 間接効果の比較
+        - 因果経路の特定
+        """)
+    
+    st.info(f"⏱️ 推定計算時間: 3-7分（{len(nodes)}ノード）")
+    
+    col_settings_ci, col_execute_ci = st.columns([2, 1])
+    
+    with col_settings_ci:
+        intervention_node = st.selectbox(
+            "介入対象ノード",
+            options=nodes,
+            help="このノードに介入（改善）した場合の効果を分析"
+        )
+        
+        intervention_strength = st.slider(
+            "介入の強さ",
+            min_value=0.5,
+            max_value=2.0,
+            value=1.5,
+            step=0.1,
+            help="1.0=現状、1.5=50%改善、0.5=50%劣化"
+        )
+        
+        max_path_length = st.slider(
+            "最大経路長",
+            min_value=2,
+            max_value=6,
+            value=4,
+            help="分析する因果経路の最大長"
+        )
+    
+    with col_execute_ci:
+        st.write("")
+        st.write("")
+        execute_ci = st.button("🚀 分析実行", key="ci_btn", type="primary", use_container_width=True)
+    
+    if execute_ci:
+        try:
+            with st.spinner("因果推論分析中..."):
+                from utils.causal_inference import CausalInferenceAnalyzer
+                from utils.analytics_progress import AnalyticsProgressTracker
+                
+                tracker_ci = AnalyticsProgressTracker("因果推論分析", total_steps=100)
+                
+                def progress_callback_ci(message, pct):
+                    tracker_ci.update(int(pct * 100), message)
+                
+                analyzer_ci = CausalInferenceAnalyzer(
+                    adjacency_matrix=st.session_state.adjacency_matrix,
+                    node_names=nodes,
+                    max_path_length=max_path_length
+                )
+                
+                result_ci = analyzer_ci.compute_causal_inference(
+                    intervention_node=intervention_node,
+                    intervention_strength=intervention_strength,
+                    progress_callback=progress_callback_ci
+                )
+                
+                if "advanced_analytics_results" not in st.session_state:
+                    st.session_state.advanced_analytics_results = {}
+                
+                st.session_state.advanced_analytics_results["causal_inference"] = {
+                    "result": result_ci,
+                    "parameters": {
+                        "intervention_node": intervention_node,
+                        "intervention_strength": intervention_strength,
+                        "max_path_length": max_path_length
+                    },
+                    "timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+                
+                tracker_ci.complete(result_ci.computation_time)
+        except Exception as e:
+            if 'tracker_ci' in locals():
+                tracker_ci.error(str(e))
+            st.error(f"❌ 因果推論分析エラー: {str(e)}")
+            with st.expander("🔍 エラー詳細"):
+                import traceback
+                st.code(traceback.format_exc(), language="python")
+    
+    if "advanced_analytics_results" in st.session_state and "causal_inference" in st.session_state.advanced_analytics_results:
+        result_data_ci = st.session_state.advanced_analytics_results["causal_inference"]
+        result_ci = result_data_ci["result"]
+        
+        st.markdown("---")
+        st.subheader("📊 分析結果")
+        
+        st.markdown(result_ci.interpretation)
+        
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("直接効果", len(result_ci.direct_effects))
+        col2.metric("間接効果", len(result_ci.indirect_effects))
+        col3.metric("交絡因子", len(result_ci.confounders))
+        col4.metric("計算時間", f"{result_ci.computation_time:.1f}秒")
+        
+        st.markdown("### 🎯 介入効果")
+        intervention_node_param = result_data_ci["parameters"]["intervention_node"]
+        intervention_effects = result_ci.intervention_effects.get(intervention_node_param, {})
+        
+        if intervention_effects:
+            import matplotlib.pyplot as plt
+            # 日本語フォント設定
+            plt.rcParams['font.sans-serif'] = ['Hiragino Sans', 'Yu Gothic', 'Meiryo', 'DejaVu Sans']
+            plt.rcParams['axes.unicode_minus'] = False
+            
+            effects_df = pd.DataFrame([
+                {"ノード": node, "因果効果": effect}
+                for node, effect in sorted(intervention_effects.items(), 
+                                          key=lambda x: abs(x[1]), reverse=True)[:15]
+            ])
+            
+            fig, ax = plt.subplots(figsize=(10, 6))
+            colors = ['red' if x < 0 else 'green' for x in effects_df["因果効果"]]
+            ax.barh(effects_df["ノード"], effects_df["因果効果"], color=colors, alpha=0.7)
+            ax.set_xlabel("因果効果")
+            ax.set_title(f"do({intervention_node_param}) の波及効果")
+            ax.axvline(x=0, color='black', linestyle='--', linewidth=0.8)
+            st.pyplot(fig)
+            plt.close()
+        
+        st.markdown("### 🛤️ 因果経路（上位5ペア）")
+        
+        top_pairs = sorted(result_ci.total_effects.items(), 
+                          key=lambda x: abs(x[1]), reverse=True)[:5]
+        
+        for (source, target), effect in top_pairs:
+            paths = result_ci.causal_paths.get((source, target), [])
+            if paths:
+                st.markdown(f"**{source} → {target}** (総効果: {effect:.4f})")
+                for i, path in enumerate(paths[:3], 1):
+                    path_str = " → ".join(path)
+                    st.caption(f"経路{i}: {path_str}")
+        
+        if result_ci.confounders:
+            st.markdown("### ⚠️ 交絡因子")
+            confounders_df = pd.DataFrame([
+                {
+                    "From": source,
+                    "To": target,
+                    "交絡因子": ", ".join(conf_list)
+                }
+                for source, target, conf_list in result_ci.confounders[:10]
+            ])
+            st.dataframe(confounders_df, use_container_width=True, hide_index=True)
+        
+        st.markdown("### 🏆 最適な介入ターゲット（上位10）")
+        if result_ci.top_intervention_targets:
+            targets_df = pd.DataFrame([
+                {"順位": i+1, "ノード": node, "総影響力": impact}
+                for i, (node, impact) in enumerate(result_ci.top_intervention_targets[:10])
+            ])
+            st.dataframe(targets_df, use_container_width=True, hide_index=True)
+    
+    # 9.6 Graph Embedding
+    st.markdown("---")
+    st.subheader("9.6. 潜在構造発見（Graph Embedding + Community Detection）")
+    
+    with st.expander("💡 この分析について", expanded=False):
+        st.markdown("""
+        **何がわかるか:**
+        
+        表面的な接続を超えた「本質的な類似性」を発見します。
+        機能的なグループを自動検出します。
+        
+        **どう使えばいいか:**
+        - カテゴリを超えた自然なグループ分け
+        - 類似ノードの統合・整理
+        - 2D可視化で直感的理解
+        
+        **結果の見方:**
+        - 近くに配置されたノード = 機能的に類似
+        - 同じ色のコミュニティ = 協力関係が強い
+        """)
+    
+    st.info(f"⏱️ 推定計算時間: 1-2分（{len(nodes)}ノード）")
+    
+    # パラメータ設定
+    col_settings_ge, col_execute_ge = st.columns([2, 1])
+    
+    with col_settings_ge:
+        embedding_dim = st.select_slider(
+            "埋め込み次元数",
+            options=[16, 32, 64, 128],
+            value=64,
+            help="ノードを表現するベクトルの次元数（大きいほど詳細だが計算時間増）"
+        )
+        
+        col_walk_len, col_walk_num = st.columns(2)
+        with col_walk_len:
+            walk_length = st.selectbox(
+                "ウォーク長",
+                options=[10, 20, 30],
+                index=1,
+                help="ランダムウォークの最大長"
+            )
+        with col_walk_num:
+            num_walks = st.selectbox(
+                "ウォーク回数",
+                options=[50, 100, 200, 500],
+                index=1,
+                help="各ノードから開始するウォーク数"
+            )
+        
+        reduction_method = st.selectbox(
+            "2D化手法",
+            options=["mds", "spectral"],
+            format_func=lambda x: "MDS（多次元尺度法）" if x == "mds" else "Spectral Embedding",
+            help="高次元埋め込みを2Dに圧縮する手法"
+        )
+    
+    with col_execute_ge:
+        st.write("")  # スペース調整
+        st.write("")
+        execute_ge = st.button("🚀 分析実行", key="embedding_execute_btn", use_container_width=True)
+    
+    # 実行
+    if execute_ge:
+        try:
+            from utils.graph_embedding import GraphEmbeddingAnalyzer
+            from utils.analytics_progress import AnalyticsProgressTracker, create_simple_callback
+            
+            tracker_ge = AnalyticsProgressTracker("Graph Embedding分析", total_steps=100)
+            
+            # 進捗コールバック
+            def progress_callback_ge(message: str, pct: float):
+                tracker_ge.progress_text.text(message)
+                tracker_ge.progress_bar.progress(pct)
+            
+            analyzer_ge = GraphEmbeddingAnalyzer(
+                adjacency_matrix=st.session_state.adjacency_matrix,
+                node_names=nodes,
+                embedding_dim=embedding_dim,
+                walk_length=walk_length,
+                num_walks=num_walks,
+                reduction_method=reduction_method
+            )
+            
+            result_ge = analyzer_ge.compute_graph_embedding(progress_callback=progress_callback_ge)
+            tracker_ge.complete(result_ge.computation_time)
+            
+            # セッションステートに保存
+            if "advanced_analytics_results" not in st.session_state:
+                st.session_state.advanced_analytics_results = {}
+            
+            st.session_state.advanced_analytics_results["graph_embedding"] = {
+                "result": result_ge,
+                "timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "parameters": {
+                    "embedding_dim": embedding_dim,
+                    "walk_length": walk_length,
+                    "num_walks": num_walks,
+                    "reduction_method": reduction_method
+                }
+            }
+        except Exception as e:
+            if 'tracker_ge' in locals():
+                tracker_ge.error(str(e))
+            st.error(f"❌ Graph Embedding分析エラー: {str(e)}")
+            with st.expander("🔍 エラー詳細"):
+                import traceback
+                st.code(traceback.format_exc(), language="python")
+    
+    # 結果表示
+    if "advanced_analytics_results" in st.session_state and \
+       "graph_embedding" in st.session_state.advanced_analytics_results:
+        
+        ge_data = st.session_state.advanced_analytics_results["graph_embedding"]
+        result_ge = ge_data["result"]
+        
+        st.markdown("---")
+        st.markdown("### 📊 分析結果")
+        
+        # 1. 解釈文
+        with st.expander("💡 結果の解釈", expanded=True):
+            st.markdown(result_ge.interpretation)
+        
+        # 2. メトリクス
+        st.markdown("#### 基本統計")
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("コミュニティ数", result_ge.n_communities)
+        col2.metric("Modularity", f"{result_ge.modularity:.3f}")
+        col3.metric("埋め込み次元", result_ge.embedding_dim)
+        col4.metric("計算時間", f"{result_ge.computation_time:.1f}秒")
+        
+        # 3. 2D散布図（コミュニティ別色分け）
+        st.markdown("#### 2D可視化（コミュニティ別）")
+        
+        import matplotlib.pyplot as plt
+        import matplotlib.colors as mcolors
+        # 日本語フォント設定
+        plt.rcParams['font.sans-serif'] = ['Hiragino Sans', 'Yu Gothic', 'Meiryo', 'DejaVu Sans']
+        plt.rcParams['axes.unicode_minus'] = False
+        
+        fig, ax = plt.subplots(figsize=(12, 8))
+        
+        # コミュニティごとに色を割り当て
+        unique_communities = sorted(set(result_ge.communities.values()))
+        colors = plt.cm.tab20(np.linspace(0, 1, len(unique_communities)))
+        community_colors = {comm_id: colors[i] for i, comm_id in enumerate(unique_communities)}
+        
+        # プロット
+        for node in nodes:
+            x, y = result_ge.node_positions_2d[node]
+            comm_id = result_ge.communities[node]
+            ax.scatter(x, y, c=[community_colors[comm_id]], s=200, alpha=0.7, edgecolors='black', linewidths=1.5)
+            ax.annotate(node, (x, y), fontsize=9, ha='center', va='center')
+        
+        ax.set_xlabel("次元1", fontsize=12)
+        ax.set_ylabel("次元2", fontsize=12)
+        ax.set_title(f"Graph Embedding 2D可視化（{result_ge.n_communities}コミュニティ）", fontsize=14)
+        ax.grid(True, alpha=0.3)
+        
+        st.pyplot(fig)
+        plt.close()
+        
+        # 4. コミュニティ詳細
+        st.markdown("#### コミュニティ詳細")
+        
+        # コミュニティごとにメンバーを整理
+        community_members = {}
+        for node, comm_id in result_ge.communities.items():
+            if comm_id not in community_members:
+                community_members[comm_id] = []
+            community_members[comm_id].append(node)
+        
+        # 各コミュニティの情報を表示
+        comm_data = []
+        for comm_id in sorted(community_members.keys()):
+            members = community_members[comm_id]
+            label = result_ge.community_labels.get(comm_id, f"コミュニティ{comm_id+1}")
+            comm_data.append({
+                "コミュニティID": comm_id + 1,
+                "名前": label,
+                "ノード数": len(members),
+                "メンバー": ", ".join(members)
+            })
+        
+        comm_df = pd.DataFrame(comm_data)
+        st.dataframe(comm_df, use_container_width=True, hide_index=True)
+        
+        # 5. 類似ノードペア
+        st.markdown("#### 類似ノードペア（上位20組）")
+        
+        similar_data = []
+        for node1, node2, sim in result_ge.top_similar_pairs[:20]:
+            similar_data.append({
+                "ノード1": node1,
+                "ノード2": node2,
+                "類似度": f"{sim:.4f}"
+            })
+        
+        similar_df = pd.DataFrame(similar_data)
+        st.dataframe(similar_df, use_container_width=True, hide_index=True)
+        
+        # 注意事項
+        st.info("""
+        **💡 活用のヒント:**
+        - 同じコミュニティ内のノードは機能的に密接に関係しています
+        - 類似度が高いノードペアは、統合や整理の候補となります
+        - 2D可視化で離れた位置にあるノードは、機能的に独立しています
+        """)
+    else:
+        st.info("👆 上の「🚀 分析実行」ボタンをクリックして、Graph Embedding分析を開始してください。")
+    
+    # 9.7 Fisher Information
+    st.markdown("---")
+    st.subheader("9.7. 感度分析（Fisher Information Matrix）")
+    
+    with st.expander("💡 この分析について", expanded=False):
+        st.markdown("""
+        **何がわかるか:**
+        
+        「どのスコアが不正確だと全体が大きく歪むか」を特定します。
+        推定精度の理論限界を計算します。
+        
+        **どう使えばいいか:**
+        - 再評価の優先順位決定（感度が高いノードを優先）
+        - 最適実験計画（どこを精密に測定すべきか）
+        - パラメータ推定の信頼性評価
+        
+        **結果の見方:**
+        - Fisher情報量が高い = そのノードが全体に大きく影響
+        - Cramér-Rao下限 = 推定精度の理論限界
+        """)
+    
+    st.info(f"⏱️ 推定計算時間: <1分（{len(nodes)}ノード）")
+    
+    # パラメータ設定
+    col_settings_fi, col_execute_fi = st.columns([2, 1])
+    
+    with col_settings_fi:
+        noise_variance_fi = st.slider(
+            "ノイズ分散（σ²）",
+            min_value=0.1,
+            max_value=5.0,
+            value=1.0,
+            step=0.1,
+            help="観測ノイズの分散を仮定します（大きいほど不確実性が高い）"
+        )
+        
+        top_k_fi = st.slider(
+            "表示する上位エッジ数",
+            min_value=10,
+            max_value=50,
+            value=20,
+            step=5,
+            help="感度が高いエッジを何組表示するか"
+        )
+    
+    with col_execute_fi:
+        st.write("")  # スペース調整
+        st.write("")
+        execute_fi = st.button("🚀 分析実行", key="fisher_execute_btn", use_container_width=True)
+    
+    # 実行
+    if execute_fi:
+        try:
+            from utils.fisher_information import FisherInformationAnalyzer
+            from utils.analytics_progress import AnalyticsProgressTracker
+            
+            tracker_fi = AnalyticsProgressTracker("Fisher Information分析", total_steps=100)
+            
+            # 進捗コールバック
+            def progress_callback_fi(message: str, pct: float):
+                tracker_fi.progress_text.text(message)
+                tracker_fi.progress_bar.progress(pct)
+            
+            analyzer_fi = FisherInformationAnalyzer(
+                adjacency_matrix=st.session_state.adjacency_matrix,
+                node_names=nodes,
+                noise_variance=noise_variance_fi
+            )
+            
+            result_fi = analyzer_fi.compute_fisher_information(progress_callback=progress_callback_fi)
+            tracker_fi.complete(result_fi.computation_time)
+            
+            # セッションステートに保存
+            if "advanced_analytics_results" not in st.session_state:
+                st.session_state.advanced_analytics_results = {}
+            
+            st.session_state.advanced_analytics_results["fisher_information"] = {
+                "result": result_fi,
+                "timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "parameters": {
+                    "noise_variance": noise_variance_fi,
+                    "top_k": top_k_fi
+                }
+            }
+        except Exception as e:
+            if 'tracker_fi' in locals():
+                tracker_fi.error(str(e))
+            st.error(f"❌ Fisher Information分析エラー: {str(e)}")
+            with st.expander("🔍 エラー詳細"):
+                import traceback
+                st.code(traceback.format_exc(), language="python")
+    
+    # 結果表示
+    if "advanced_analytics_results" in st.session_state and \
+       "fisher_information" in st.session_state.advanced_analytics_results:
+        
+        fi_data = st.session_state.advanced_analytics_results["fisher_information"]
+        result_fi = fi_data["result"]
+        
+        st.markdown("---")
+        st.markdown("### 📊 分析結果")
+        
+        # 1. 解釈文
+        with st.expander("💡 結果の解釈", expanded=True):
+            st.markdown(result_fi.interpretation)
+        
+        # 2. メトリクス
+        st.markdown("#### 基本統計")
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("総エッジ数", result_fi.n_edges)
+        col2.metric("条件数", f"{result_fi.condition_number:.2f}")
+        col3.metric("実効ランク", result_fi.effective_rank)
+        col4.metric("計算時間", f"{result_fi.computation_time:.1f}秒")
+        
+        # 3. 感度スコアランキング
+        st.markdown("#### 感度スコアランキング（上位20）")
+        
+        import matplotlib.pyplot as plt
+        # 日本語フォント設定
+        plt.rcParams['font.sans-serif'] = ['Hiragino Sans', 'Yu Gothic', 'Meiryo', 'DejaVu Sans']
+        plt.rcParams['axes.unicode_minus'] = False
+        
+        fig, ax = plt.subplots(figsize=(12, 6))
+        
+        top_edges = result_fi.top_sensitive_edges[:20]
+        edge_labels = [f"{s}→{t}" for s, t, _ in top_edges]
+        sensitivities = [score for _, _, score in top_edges]
+        
+        y_pos = np.arange(len(edge_labels))
+        ax.barh(y_pos, sensitivities, color='steelblue', alpha=0.7)
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(edge_labels, fontsize=9)
+        ax.set_xlabel("感度スコア", fontsize=12)
+        ax.set_title("Fisher情報量（感度）ランキング", fontsize=14)
+        ax.grid(True, alpha=0.3, axis='x')
+        
+        st.pyplot(fig)
+        plt.close()
+        
+        # 4. Cramér-Rao下限テーブル
+        st.markdown("#### Cramér-Rao下限（推定精度限界、上位20）")
+        
+        # CR下限を降順ソート（大きい = 推定が困難）
+        cr_sorted = sorted(
+            result_fi.cramer_rao_bounds.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )[:20]
+        
+        cr_data = []
+        for (source, target), bound in cr_sorted:
+            cr_data.append({
+                "From": source,
+                "To": target,
+                "CR下限": f"{bound:.6f}",
+                "推定難易度": "高" if bound > np.mean(list(result_fi.cramer_rao_bounds.values())) else "中"
+            })
+        
+        cr_df = pd.DataFrame(cr_data)
+        st.dataframe(cr_df, use_container_width=True, hide_index=True)
+        
+        # 5. 固有値分布
+        st.markdown("#### 固有値分布（Scree Plot）")
+        
+        fig2, ax2 = plt.subplots(figsize=(10, 5))
+        
+        eigenvalues = result_fi.eigenvalues
+        ax2.plot(range(1, len(eigenvalues) + 1), eigenvalues, 'o-', color='darkblue', linewidth=2, markersize=6)
+        ax2.set_xlabel("固有値のインデックス", fontsize=12)
+        ax2.set_ylabel("固有値", fontsize=12)
+        ax2.set_title("Fisher情報行列の固有値分布", fontsize=14)
+        ax2.grid(True, alpha=0.3)
+        ax2.set_yscale('log')  # 対数スケール
+        
+        st.pyplot(fig2)
+        plt.close()
+        
+        # 注意事項
+        st.info("""
+        **💡 活用のヒント:**
+        - 感度スコアが高いエッジは、再評価の優先順位が高いです
+        - CR下限が大きいエッジは、推定が本質的に困難です（追加データが必要）
+        - 条件数が大きい場合は、多重共線性がある可能性があります
+        """)
+    else:
+        st.info("👆 上の「🚀 分析実行」ボタンをクリックして、Fisher Information分析を開始してください。")
 
 
 def main() -> None:
@@ -2382,7 +4253,7 @@ def main() -> None:
     
     render_sidebar()
     
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
         "📝 ステップ1: プロセス定義",
         "🎯 ステップ2: 機能カテゴリ",
         "🔧 ステップ3: ノード定義",
@@ -2390,7 +4261,8 @@ def main() -> None:
         "📈 ステップ5: 行列分析",
         "📊 ステップ6: ネットワーク可視化",
         "🔬 ステップ7: ネットワーク分析",
-        "🎮 ステップ8: DSM最適化"
+        "🎮 ステップ8: DSM最適化",
+        "🧬 ステップ9: 高度な分析"
     ])
     
     with tab1:
@@ -2416,6 +4288,9 @@ def main() -> None:
     
     with tab8:
         tab8_dsm_optimization()
+    
+    with tab9:
+        tab9_advanced_analytics()
 
 
 if __name__ == "__main__":

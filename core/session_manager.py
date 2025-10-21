@@ -190,9 +190,92 @@ class SessionManager:
         )
 
     @staticmethod
+    def save_evaluation_matrix(
+        from_nodes: List[str],
+        to_nodes: List[str],
+        matrix: List[List[int]],
+        from_category: str,
+        to_category: str
+    ) -> None:
+        """
+        評価行列を保存（行列形式）
+        
+        Args:
+            from_nodes: 評価元ノードリスト（行）
+            to_nodes: 評価先ノードリスト（列）
+            matrix: n×mの評価行列（2次元リスト）
+            from_category: 評価元カテゴリ名
+            to_category: 評価先カテゴリ名
+        """
+        if "evaluation_matrices" not in st.session_state:
+            st.session_state.evaluation_matrices = []
+        
+        # 既存の行列を検索（上書き対応）
+        for existing in st.session_state.evaluation_matrices:
+            if (existing["from_category"] == from_category and
+                existing["to_category"] == to_category):
+                existing["from_nodes"] = from_nodes
+                existing["to_nodes"] = to_nodes
+                existing["matrix"] = matrix
+                return
+        
+        # 新規追加
+        st.session_state.evaluation_matrices.append({
+            "from_category": from_category,
+            "to_category": to_category,
+            "from_nodes": from_nodes,
+            "to_nodes": to_nodes,
+            "matrix": matrix
+        })
+
+    @staticmethod
+    def get_evaluation_matrices() -> List[Dict[str, Any]]:
+        """
+        評価行列リストを取得
+        
+        Returns:
+            評価行列のリスト
+        """
+        if "evaluation_matrices" not in st.session_state:
+            st.session_state.evaluation_matrices = []
+        return st.session_state.evaluation_matrices
+
+    @staticmethod
     def get_evaluations() -> List[Dict[str, Any]]:
-        """評価リストの取得"""
-        return st.session_state.project_data["evaluations"]
+        """
+        評価リストの取得（後方互換性のため）
+        
+        行列形式から動的にリスト形式を生成します。
+        非ゼロの評価のみを返します（疎行列最適化）。
+        
+        Returns:
+            評価リスト
+        """
+        # まず行列形式から生成を試みる
+        if "evaluation_matrices" in st.session_state and st.session_state.evaluation_matrices:
+            evaluations = []
+            matrices = st.session_state.evaluation_matrices
+            
+            for matrix_data in matrices:
+                from_nodes = matrix_data["from_nodes"]
+                to_nodes = matrix_data["to_nodes"]
+                matrix = matrix_data["matrix"]
+                
+                for i, from_node in enumerate(from_nodes):
+                    for j, to_node in enumerate(to_nodes):
+                        score = matrix[i][j]
+                        if score != 0:  # 非ゼロのみ（疎行列）
+                            evaluations.append({
+                                "from_node": from_node,
+                                "to_node": to_node,
+                                "score": score,
+                                "reason": ""
+                            })
+            
+            return evaluations
+        
+        # フォールバック: 旧形式の評価リスト
+        return st.session_state.project_data.get("evaluations", [])
 
     @staticmethod
     def get_evaluation(from_node: str, to_node: str) -> Optional[Dict[str, Any]]:

@@ -10,6 +10,10 @@ headless = true
 port = 8501
 enableCORS = false
 enableXsrfProtection = true
+maxUploadSize = 500
+maxMessageSize = 500
+runOnSave = false
+fileWatcherType = "auto"
 
 [browser]
 gatherUsageStats = false
