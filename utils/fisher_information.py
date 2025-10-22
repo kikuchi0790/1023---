@@ -44,18 +44,21 @@ class FisherInformationAnalyzer:
         self,
         adjacency_matrix: np.ndarray,
         node_names: List[str],
-        noise_variance: float = 1.0
+        noise_variance: float = 1.0,
+        mode: str = "basic"
     ):
         """
         Args:
             adjacency_matrix: 隣接行列（N×N）
             node_names: ノード名リスト
             noise_variance: 観測ノイズの分散（σ²）
+            mode: 計算モード ("basic" or "normalized")
         """
         self.matrix = adjacency_matrix.copy()
         self.node_names = node_names
         self.n = len(node_names)
         self.noise_variance = noise_variance
+        self.mode = mode
         
         # 非ゼロエッジのリスト
         self.edges = []
@@ -66,7 +69,7 @@ class FisherInformationAnalyzer:
         
         self.n_edges = len(self.edges)
         
-        logger.info(f"FisherInformationAnalyzer初期化: {self.n}ノード, {self.n_edges}エッジ")
+        logger.info(f"FisherInformationAnalyzer初期化: {self.n}ノード, {self.n_edges}エッジ, モード={self.mode}")
     
     def compute_fisher_information(
         self,
@@ -150,13 +153,28 @@ class FisherInformationAnalyzer:
         # 各エッジがシステム全体に与える影響を表現
         A = np.zeros((self.n * self.n, self.n_edges))
         
+        # モードに応じた正規化係数の計算
+        if self.mode == "normalized":
+            # 正規化モード: 最大絶対値で正規化（0-1範囲）
+            nonzero_values = np.abs(self.matrix[self.matrix != 0])
+            max_abs_score = np.max(nonzero_values) if len(nonzero_values) > 0 else 1.0
+        else:
+            # 基本モード: 正規化なし
+            max_abs_score = 1.0
+        
         for k, (source, target) in enumerate(self.edges):
             i = self.node_names.index(source)
             j = self.node_names.index(target)
             
             # エッジ k の影響は位置 (i, j) に現れる
             idx = i * self.n + j
-            A[idx, k] = 1.0
+            
+            if self.mode == "normalized":
+                # 正規化モード: 絶対値を正規化
+                A[idx, k] = abs(self.matrix[i, j]) / max_abs_score
+            else:
+                # 基本モード: 実際のエッジの重み（スコア）を使用
+                A[idx, k] = self.matrix[i, j]
         
         # Fisher情報行列: I(θ) = (1/σ²) A^T A
         fisher_matrix = (1.0 / self.noise_variance) * (A.T @ A)

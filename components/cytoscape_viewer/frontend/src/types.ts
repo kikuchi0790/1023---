@@ -4,6 +4,10 @@ export interface CytoscapeNodeData {
   label: string;
   level: number;
   category?: string;
+  pagerank?: number;
+  betweenness?: number;
+  in_degree?: number;
+  out_degree?: number;
 }
 
 export interface CytoscapeEdgeData {
@@ -31,9 +35,19 @@ export interface GraphData {
   edges: CytoscapeEdge[];
 }
 
+export interface NetworkMetrics {
+  [nodeName: string]: {
+    pagerank?: number;
+    betweenness?: number;
+    in_degree?: number;
+    out_degree?: number;
+  };
+}
+
 export interface ComponentArgs {
   graph_data: GraphData;
   layout: string;
   height: number;
   threshold: number;
+  network_metrics?: NetworkMetrics;
 }

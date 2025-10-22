@@ -27,6 +27,7 @@ def cytoscape_2d_viewer(
     layout: str = "cose",
     height: int = 600,
     threshold: float = 2.0,
+    network_metrics: Optional[Dict[str, Dict[str, float]]] = None,
     key: Optional[str] = None
 ) -> Optional[Dict[str, Any]]:
     """
@@ -46,6 +47,8 @@ def cytoscape_2d_viewer(
         コンポーネントの高さ (px)
     threshold : float
         エッジ表示の閾値
+    network_metrics : Optional[Dict[str, Dict[str, float]]]
+        ネットワーク分析メトリクス（ノード名 → {pagerank, betweenness, ...}）
     key : str, optional
         Streamlitコンポーネントキー
     
@@ -59,6 +62,7 @@ def cytoscape_2d_viewer(
         layout=layout,
         height=height,
         threshold=threshold,
+        network_metrics=network_metrics,
         key=key,
         default=None
     )

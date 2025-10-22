@@ -7,11 +7,13 @@ Adapted from nsga_2_clean.py for Process Insight Modeler
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import pickle
 import random
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
 from functools import partial
 from pathlib import Path
@@ -28,6 +30,11 @@ CHECKPOINT_DIR.mkdir(exist_ok=True)
 
 RANDOM_SEED = 42
 np.set_printoptions(threshold=np.inf, linewidth=np.inf)
+
+# 閉路検出のキャッシュ（グローバル）
+_cycle_cache: Dict[str, List] = {}
+_cache_hits = 0
+_cache_misses = 0
 
 
 class PIMDSMData:
@@ -327,9 +334,11 @@ def calculate_freedom(package: dict) -> float:
 class PIMStep1NSGA2:
     """STEP-1: 設計パラメータ選択の最適化"""
     
-    def __init__(self, data: PIMDSMData):
+    def __init__(self, data: PIMDSMData, use_parallel: bool = False):
         self.data = data
         self.at_request = data.get_at_request()
+        self.use_parallel = use_parallel
+        self.executor = None
         random.seed(RANDOM_SEED)
         
         # DEAP creator登録（ユニーク名で重複回避）
@@ -351,6 +360,17 @@ class PIMStep1NSGA2:
         self.toolbox.register("mate", self._crossover)
         self.toolbox.register("mutate", partial(self._mutate, mutpb=0.05))
         self.toolbox.register("select", tools.selNSGA2)
+        
+        # 並列化の設定
+        if use_parallel:
+            n_processes = max(1, os.cpu_count() // 2) if os.cpu_count() else 2
+            logger.info(f"STEP-1: 並列化を有効化（{n_processes}プロセス）")
+            try:
+                self.executor = ProcessPoolExecutor(max_workers=n_processes)
+                self.toolbox.register("map", self.executor.map)
+            except Exception as e:
+                logger.warning(f"並列化の初期化に失敗: {e}。逐次実行にフォールバック。")
+                self.use_parallel = False
     
     def _create_individual(self):
         """個体生成（バイナリベクトル）
@@ -458,6 +478,10 @@ class PIMStep1NSGA2:
             for ind, fit in zip(pop, fitnesses):
                 ind.fitness.values = fit
         
+        # 早期終了用のパレートサイズ履歴
+        pareto_size_history = []
+        convergence_window = 10  # 10世代連続で改善なしで終了
+        
         # 世代ループ
         for gen in range(start_gen, n_gen):
             # 選択
@@ -489,10 +513,22 @@ class PIMStep1NSGA2:
             
             # パレートフロント
             pareto_front = tools.sortNondominated(pop, len(pop), first_front_only=True)[0]
+            pareto_size_history.append(len(pareto_front))
             
             # 進捗コールバック
             if progress_callback:
                 progress_callback(gen + 1, len(pareto_front))
+            
+            # 収束判定（10世代連続で改善なし → 早期終了）
+            if gen >= convergence_window:
+                recent_sizes = pareto_size_history[-convergence_window:]
+                size_range = max(recent_sizes) - min(recent_sizes)
+                if size_range <= 1:  # サイズ変化が1以下
+                    logger.info(f"STEP-1 収束しました（世代{gen+1}/{n_gen}、パレート解数={len(pareto_front)}）")
+                    # 進捗を100%に更新
+                    if progress_callback:
+                        progress_callback(n_gen, len(pareto_front))
+                    break
             
             # チェックポイント保存
             if checkpoint_id and (gen + 1) % save_every == 0:
@@ -511,6 +547,14 @@ class PIMStep1NSGA2:
         # 最終チェックポイント削除
         if checkpoint_id:
             clear_checkpoints(checkpoint_id)
+        
+        # 並列化リソースのクリーンアップ
+        if self.use_parallel and self.executor:
+            try:
+                self.executor.shutdown(wait=True)
+                logger.info("STEP-1: 並列化リソースを解放しました")
+            except Exception as e:
+                logger.warning(f"並列化リソースの解放中にエラー: {e}")
         
         return pareto_front
 
@@ -622,11 +666,44 @@ def calc_conflict_difficulty(matrix, at_range, dp_link_num, dp_link_weight_produ
 
 # -- Loop difficulty --
 
+def _matrix_hash(matrix: np.ndarray) -> str:
+    """行列のハッシュ値を計算（キャッシュキー用）"""
+    return hashlib.md5(matrix.tobytes()).hexdigest()
+
+
 def _extract_cycles(matrix):
-    """閉路検出"""
+    """閉路検出（キャッシング付き）"""
+    global _cache_hits, _cache_misses
+    
+    mat_hash = _matrix_hash(matrix)
+    
+    # キャッシュヒット
+    if mat_hash in _cycle_cache:
+        _cache_hits += 1
+        return _cycle_cache[mat_hash]
+    
+    # キャッシュミス: 計算
+    _cache_misses += 1
     import networkx as nx
     G = nx.DiGraph(matrix)
-    return list(nx.simple_cycles(G))
+    cycles = list(nx.simple_cycles(G))
+    
+    # キャッシュに保存（最大1000エントリー、LRU削除）
+    if len(_cycle_cache) >= 1000:
+        # 最も古いエントリーを削除
+        first_key = next(iter(_cycle_cache))
+        _cycle_cache.pop(first_key)
+        logger.debug(f"キャッシュLRU削除: {first_key[:8]}...")
+    
+    _cycle_cache[mat_hash] = cycles
+    
+    # 定期的にキャッシュヒット率をログ出力
+    total = _cache_hits + _cache_misses
+    if total > 0 and total % 100 == 0:
+        hit_rate = _cache_hits / total * 100
+        logger.info(f"閉路検出キャッシュヒット率: {hit_rate:.1f}% ({_cache_hits}/{total})")
+    
+    return cycles
 
 
 def _loop_factors(matrix, cycles, at_range):
@@ -658,11 +735,13 @@ def calc_loop_difficulty(matrix, at_range):
 class PIMStep2NSGA2:
     """STEP-2: 依存関係方向決定の最適化"""
     
-    def __init__(self, data: PIMDSMData, fixed_indices: List[int]):
+    def __init__(self, data: PIMDSMData, fixed_indices: List[int], use_parallel: bool = False):
         self.data = data
         self.fixed_indices = fixed_indices
         self.pkg = self._make_package_step2(fixed_indices)
         self.fn_num = data.fn_num
+        self.use_parallel = use_parallel
+        self.executor = None
         random.seed(RANDOM_SEED)
         
         creator_name_fitness = f"PIMStep2Fitness_{id(self)}"
@@ -688,6 +767,17 @@ class PIMStep2NSGA2:
         self.toolbox.register("mutate", self._mutate, init_mat=self.pkg["matrix"], mutpb=0.05)
         self.toolbox.register("select", tools.selNSGA2)
         self.toolbox.register("evaluate", self._evaluate)
+        
+        # 並列化の設定
+        if use_parallel:
+            n_processes = max(1, os.cpu_count() // 2) if os.cpu_count() else 2
+            logger.info(f"STEP-2: 並列化を有効化（{n_processes}プロセス）")
+            try:
+                self.executor = ProcessPoolExecutor(max_workers=n_processes)
+                self.toolbox.register("map", self.executor.map)
+            except Exception as e:
+                logger.warning(f"並列化の初期化に失敗: {e}。逐次実行にフォールバック。")
+                self.use_parallel = False
     
     def _make_package_step2(self, combo: List[int]):
         """STEP-2用パッケージ生成"""
@@ -808,6 +898,10 @@ class PIMStep2NSGA2:
             for ind, fit in zip(pop, fitnesses):
                 ind.fitness.values = fit
         
+        # 早期終了用のパレートサイズ履歴
+        pareto_size_history = []
+        convergence_window = 10  # 10世代連続で改善なしで終了
+        
         # 世代ループ
         for gen in range(start_gen, n_gen):
             # 選択
@@ -838,10 +932,22 @@ class PIMStep2NSGA2:
             
             # パレートフロント
             pareto_front = tools.sortNondominated(pop, len(pop), first_front_only=True)[0]
+            pareto_size_history.append(len(pareto_front))
             
             # 進捗コールバック
             if progress_callback:
                 progress_callback(gen + 1, len(pareto_front))
+            
+            # 収束判定（10世代連続で改善なし → 早期終了）
+            if gen >= convergence_window:
+                recent_sizes = pareto_size_history[-convergence_window:]
+                size_range = max(recent_sizes) - min(recent_sizes)
+                if size_range <= 1:  # サイズ変化が1以下
+                    logger.info(f"STEP-2 収束しました（世代{gen+1}/{n_gen}、パレート解数={len(pareto_front)}）")
+                    # 進捗を100%に更新
+                    if progress_callback:
+                        progress_callback(n_gen, len(pareto_front))
+                    break
             
             # チェックポイント保存
             if checkpoint_id and (gen + 1) % save_every == 0:
@@ -861,4 +967,272 @@ class PIMStep2NSGA2:
         if checkpoint_id:
             clear_checkpoints(checkpoint_id)
         
+        # 並列化リソースのクリーンアップ
+        if self.use_parallel and self.executor:
+            try:
+                self.executor.shutdown(wait=True)
+                logger.info("STEP-2: 並列化リソースを解放しました")
+            except Exception as e:
+                logger.warning(f"並列化リソースの解放中にエラー: {e}")
+        
         return pareto_front
+
+
+class PIMStep2PairwiseNSGA2:
+    """STEP-2.B: 2目的×3ペアの最適化（高速版）"""
+    
+    def __init__(self, data: PIMDSMData, fixed_indices: List[int], use_parallel: bool = False):
+        self.data = data
+        self.fixed_indices = fixed_indices
+        self.pkg = self._make_package_step2(fixed_indices)
+        self.fn_num = data.fn_num
+        self.use_parallel = use_parallel
+        self.executor = None
+        random.seed(RANDOM_SEED)
+    
+    def _make_package_step2(self, combo: List[int]):
+        """STEP-2用パッケージ生成（PIMStep2NSGA2と同じ）"""
+        d = self.data
+        mod_matrix = remove_rows_and_columns(d.original_matrix, combo)
+        mod_range = remove_indices(d.original_dp_range, combo)
+        
+        def _link_weight_product():
+            res = np.zeros((1, mod_matrix.shape[0]))
+            columns_removed = set(combo)
+            for i in range(d.fn_num, d.om_size):
+                if i in columns_removed:
+                    continue
+                prod = 1
+                for col in columns_removed:
+                    if d.original_matrix[i, col] != 0:
+                        prod *= d.original_matrix[i, col]
+                res[0, i - len([c for c in combo if c < i])] = abs(prod)
+            return res
+        
+        def _link_num():
+            res = np.zeros((1, mod_matrix.shape[0]))
+            columns_removed = set(combo)
+            for i in range(d.fn_num, d.om_size):
+                if i in columns_removed:
+                    continue
+                cnt = sum(
+                    1
+                    for col in columns_removed
+                    if col < d.original_matrix.shape[1] and d.original_matrix[i, col] != 0
+                )
+                res[0, i - len([c for c in combo if c < i])] = cnt
+            return res
+        
+        pkg = {
+            "matrix": mod_matrix.astype(float),
+            "range": mod_range.astype(float),
+            "fn_importance": remove_indices(d.original_fn_importance, combo).astype(float),
+            "dp_link_weight_product": _link_weight_product(),
+            "dp_link_num": _link_num(),
+            "matrix_size": mod_matrix.shape[0],
+            "node_name": remove_indices(d.original_node_name, combo),
+        }
+        return pkg
+    
+    def run_pairwise(
+        self,
+        n_pop: int = 100,
+        n_gen: int = 30,
+        progress_callback: Optional[callable] = None
+    ) -> Dict[str, List]:
+        """3ペアの2目的最適化を順次実行
+        
+        Returns:
+            {
+                'adj_conf': [pareto_front, objectives_names],
+                'adj_loop': [pareto_front, objectives_names],
+                'conf_loop': [pareto_front, objectives_names]
+            }
+        """
+        logger.info(f"Running STEP-2.B Pairwise: pop={n_pop}, gen={n_gen}")
+        
+        results = {}
+        
+        # ペア1: 調整 vs 競合
+        logger.info("Pair 1/3: Adjustment vs Conflict")
+        results['adj_conf'] = self._run_pair(
+            objectives=['adjustment', 'conflict'],
+            n_pop=n_pop,
+            n_gen=n_gen,
+            pair_name="調整 vs 競合",
+            progress_callback=lambda gen, ps: progress_callback(f"ペア1/3 (調整 vs 競合)", gen, ps) if progress_callback else None
+        )
+        
+        # ペア2: 調整 vs ループ
+        logger.info("Pair 2/3: Adjustment vs Loop")
+        results['adj_loop'] = self._run_pair(
+            objectives=['adjustment', 'loop'],
+            n_pop=n_pop,
+            n_gen=n_gen,
+            pair_name="調整 vs ループ",
+            progress_callback=lambda gen, ps: progress_callback(f"ペア2/3 (調整 vs ループ)", gen, ps) if progress_callback else None
+        )
+        
+        # ペア3: 競合 vs ループ
+        logger.info("Pair 3/3: Conflict vs Loop")
+        results['conf_loop'] = self._run_pair(
+            objectives=['conflict', 'loop'],
+            n_pop=n_pop,
+            n_gen=n_gen,
+            pair_name="競合 vs ループ",
+            progress_callback=lambda gen, ps: progress_callback(f"ペア3/3 (競合 vs ループ)", gen, ps) if progress_callback else None
+        )
+        
+        return results
+    
+    def _run_pair(
+        self,
+        objectives: List[str],
+        n_pop: int,
+        n_gen: int,
+        pair_name: str,
+        progress_callback: Optional[callable] = None
+    ) -> Tuple[List, List[str]]:
+        """2目的関数の最適化を実行
+        
+        Args:
+            objectives: 目的関数名のリスト（長さ2）['adjustment', 'conflict'] など
+            n_pop: 個体数
+            n_gen: 世代数
+            pair_name: ペア名（ログ用）
+            progress_callback: 進捗コールバック
+        
+        Returns:
+            (pareto_front, objectives_names)
+        """
+        # 動的にcreatorを設定
+        creator_name_fitness = f"PIMStep2PairFitness_{id(self)}_{objectives[0]}_{objectives[1]}"
+        creator_name_individual = f"PIMStep2PairIndividual_{id(self)}_{objectives[0]}_{objectives[1]}"
+        
+        # 既存のクラスを削除（念のため）
+        if hasattr(creator, creator_name_fitness):
+            delattr(creator, creator_name_fitness)
+        if hasattr(creator, creator_name_individual):
+            delattr(creator, creator_name_individual)
+        
+        # 新規作成（2目的、両方最小化）
+        creator.create(creator_name_fitness, base.Fitness, weights=(-1.0, -1.0))
+        creator.create(creator_name_individual, list, fitness=getattr(creator, creator_name_fitness))
+        
+        fitness_class = getattr(creator, creator_name_fitness)
+        individual_class = getattr(creator, creator_name_individual)
+        
+        # toolbox設定
+        toolbox = base.Toolbox()
+        toolbox.register(
+            "individual",
+            tools.initIterate,
+            individual_class,
+            lambda: [apply_options_to_all(self.pkg["matrix"])],
+        )
+        toolbox.register("population", tools.initRepeat, list, toolbox.individual)
+        toolbox.register("mate", self._crossover)
+        toolbox.register("mutate", self._mutate, init_mat=self.pkg["matrix"], mutpb=0.05)
+        toolbox.register("select", tools.selNSGA2)
+        
+        # 評価関数を動的に生成
+        def evaluate_pair(individual):
+            mat = individual[0]
+            d = self.pkg
+            results_map = {}
+            
+            # 各目的関数を計算
+            if 'adjustment' in objectives:
+                results_map['adjustment'] = calc_adjustment_difficulty(mat, d["range"], d["fn_importance"], self.fn_num)
+            if 'conflict' in objectives:
+                results_map['conflict'] = calc_conflict_difficulty(mat, d["range"], d["dp_link_num"], d["dp_link_weight_product"])
+            if 'loop' in objectives:
+                results_map['loop'] = calc_loop_difficulty(mat, d["range"])
+            
+            # objectives順に返す
+            return tuple(results_map[obj] for obj in objectives)
+        
+        toolbox.register("evaluate", evaluate_pair)
+        
+        # 並列化設定
+        if self.use_parallel:
+            n_processes = max(1, os.cpu_count() // 2) if os.cpu_count() else 2
+            try:
+                executor = ProcessPoolExecutor(max_workers=n_processes)
+                toolbox.register("map", executor.map)
+            except Exception as e:
+                logger.warning(f"並列化の初期化に失敗: {e}。逐次実行にフォールバック。")
+        
+        # 初期集団
+        pop = toolbox.population(n=n_pop)
+        
+        # 評価
+        fitnesses = list(toolbox.map(toolbox.evaluate, pop))
+        for ind, fit in zip(pop, fitnesses):
+            ind.fitness.values = fit
+        
+        CXPB, MUTPB = 0.9, 0.05
+        MU, LAMBDA = n_pop // 3, 2 * n_pop // 3
+        
+        # 進化ループ
+        for gen in range(n_gen):
+            offspring = algorithms.varOr(pop, toolbox, LAMBDA, CXPB, MUTPB)
+            
+            # 評価
+            invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
+            fitnesses = list(toolbox.map(toolbox.evaluate, invalid_ind))
+            for ind, fit in zip(invalid_ind, fitnesses):
+                ind.fitness.values = fit
+            
+            # 選択
+            pop = toolbox.select(pop + offspring, MU)
+            
+            # 進捗コールバック
+            if progress_callback:
+                pareto_front = tools.sortNondominated(pop, len(pop), first_front_only=True)[0]
+                progress_callback(gen + 1, len(pareto_front))
+        
+        # 最終パレートフロント
+        pareto_front = tools.sortNondominated(pop, len(pop), first_front_only=True)[0]
+        logger.info(f"Pair ({pair_name}) completed: {len(pareto_front)} Pareto solutions")
+        
+        # 並列化リソースのクリーンアップ
+        if self.use_parallel:
+            try:
+                executor.shutdown(wait=True)
+            except:
+                pass
+        
+        # creatorのクリーンアップ
+        try:
+            delattr(creator, creator_name_fitness)
+            delattr(creator, creator_name_individual)
+        except:
+            pass
+        
+        return (pareto_front, objectives)
+    
+    @staticmethod
+    def _mutate(individual, init_mat: np.ndarray, mutpb: float):
+        """突然変異（リンク方向反転）"""
+        mat = individual[0]
+        size = mat.shape[0]
+        for i in range(size):
+            for j in range(i + 1, size):
+                if init_mat[i, j] != 0 and init_mat[j, i] != 0 and random.random() < mutpb:
+                    mat[i, j], mat[j, i] = mat[j, i], mat[i, j]
+        return (individual,)
+    
+    @staticmethod
+    def _crossover(ind1, ind2, cx_prob: float = 0.5):
+        """交叉（ブロック交叉）"""
+        if random.random() < cx_prob:
+            mat1, mat2 = ind1[0].copy(), ind2[0].copy()
+            size = mat1.shape[0]
+            cx_point = random.randint(1, size - 1)
+            mat1[:cx_point, :cx_point], mat2[:cx_point, :cx_point] = (
+                mat2[:cx_point, :cx_point],
+                mat1[:cx_point, :cx_point],
+            )
+            ind1[0], ind2[0] = mat1, mat2
+        return ind1, ind2

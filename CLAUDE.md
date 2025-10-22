@@ -421,6 +421,208 @@ result = example_viewer(
 )
 ```
 
+## ステップ6: 2D可視化（Cytoscape.js）の詳細 ✅ Neo4j並みのUX実現
+
+### 実装概要（2025-10-21）
+
+Neo4j Browserのようなインタラクティブな2D可視化を実現。Phase 1（基本インタラクティブ性）とPhase 4（ビジュアル＆UX強化）を優先実装。
+
+### アーキテクチャ
+
+**データフロー:**
+```
+ステップ7（ネットワーク分析）
+  ↓ PageRank、媒介中心性、次数を計算
+  ↓ st.session_state.network_metricsに保存
+  ↓
+ステップ6（2D可視化）
+  ↓ network_metricsを取得
+  ↓ cytoscape_bridge.pyでノードデータに埋め込み
+  ↓ Reactコンポーネントで可視化
+  ↓ ノードサイズ = PageRank反映
+  ↓ ツールチップに全メトリクス表示
+```
+
+**変更ファイル一覧（8ファイル）:**
+
+1. **フロントエンド（4ファイル）:**
+   - `components/cytoscape_viewer/frontend/package.json` - 4パッケージ追加
+   - `components/cytoscape_viewer/frontend/webpack.config.js` - CSSローダー追加
+   - `components/cytoscape_viewer/frontend/src/types.ts` - メトリクスプロパティ追加
+   - `components/cytoscape_viewer/frontend/src/CytoscapeGraph.tsx` - 完全書き換え（360行）
+
+2. **バックエンド（4ファイル）:**
+   - `utils/cytoscape_bridge.py` - network_metricsパラメータ対応
+   - `components/cytoscape_viewer/component.py` - network_metrics props追加
+   - `app_tabs.py` (tab7_network_analysis) - メトリクス保存ロジック追加
+   - `app_tabs.py` (tab6_visualization) - メトリクス取得＆エクスポートボタン追加
+
+### 主要機能
+
+#### 1. ツールチップ（Tippy.js）
+
+**実装:**
+```typescript
+const createTooltip = (node: NodeSingular) => {
+  const content = `
+    <strong>${nodeName}</strong><br/>
+    タイプ: ${typeLabels[nodeType]}<br/>
+    ${pagerank > 0 ? `PageRank: ${pagerank.toFixed(4)}<br/>` : ""}
+    ${betweenness > 0 ? `媒介中心性: ${betweenness.toFixed(4)}<br/>` : ""}
+    ${inDegree > 0 ? `入次数: ${inDegree.toFixed(2)}<br/>` : ""}
+    ${outDegree > 0 ? `出次数: ${outDegree.toFixed(2)}` : ""}
+  `;
+  // Tippy.js統合...
+};
+```
+
+**動作:**
+- ホバー時に自動表示
+- ノード名、タイプ、ステップ7で計算した全メトリクスを表示
+- スタイル: light-border、上部配置、矢印付き
+
+#### 2. ノードサイズの動的計算
+
+**実装:**
+```typescript
+const calculateNodeSize = (pagerank: number | undefined): number => {
+  const baseSize = 30;
+  const scaleFactor = 150;
+  if (!pagerank || pagerank === 0) return baseSize;
+  return baseSize + pagerank * scaleFactor;
+};
+```
+
+**効果:**
+- PageRank高いノード = 大きく表示（最大180px程度）
+- PageRank低いノード/未計算 = 基本サイズ（30px）
+- 重要度が一目瞭然
+
+#### 3. エッジの太さの動的計算
+
+**実装:**
+```typescript
+const calculateEdgeWidth = (label: string): number => {
+  const score = Math.abs(parseFloat(label));
+  if (score >= 7) return 6; // 太い（強い影響）
+  if (score >= 4) return 3; // 中（中程度の影響）
+  return 1; // 細い（弱い影響）
+};
+```
+
+**効果:**
+- スコア7-9: 太いエッジ（6px） - 強い影響関係
+- スコア4-6: 中太エッジ（3px） - 中程度の影響
+- スコア1-3: 細いエッジ（1px） - 弱い影響
+
+#### 4. ハイライト機能
+
+**実装:**
+```typescript
+cy.on("tap", "node", (evt) => {
+  const node = evt.target;
+  const connectedEdges = node.connectedEdges();
+  const connectedNodes = connectedEdges.connectedNodes();
+  
+  // それ以外をフェード
+  cy.elements().not(node).not(connectedEdges).not(connectedNodes).addClass("faded");
+  // 接続エッジをハイライト
+  connectedEdges.addClass("highlighted");
+});
+```
+
+**効果:**
+- クリックしたノードと接続ノード/エッジが明るく表示
+- それ以外は半透明化（opacity: 0.3）
+- 接続エッジは金色で太く強調（#FFD700、太さ2倍）
+
+#### 5. PNG/SVGエクスポート
+
+**実装:**
+```typescript
+(window as any).exportCytoscapeImage = (format: "png" | "svg") => {
+  if (format === "png") {
+    const blob = cyRef.current.png({ full: true, scale: 2 });
+    // ダウンロード処理...
+  } else {
+    const svgContent = cyRef.current.svg({ full: true, scale: 1 });
+    // ダウンロード処理...
+  }
+};
+```
+
+**Streamlit側:**
+```python
+if st.button("PNG保存"):
+    st.components.v1.html("""
+    <script>
+    if (window.exportCytoscapeImage) {
+        window.exportCytoscapeImage('png');
+    }
+    </script>
+    """, height=0)
+```
+
+**効果:**
+- PNGは2倍スケール（高解像度）
+- SVGはベクター形式（拡大縮小可能）
+- レポート作成に便利
+
+### ビルドコマンド
+
+```bash
+cd components/cytoscape_viewer/frontend
+npm install  # Tippy.js, cytoscape-popper, cytoscape-panzoom追加
+npm run build
+```
+
+**注意:**
+- `webpack.config.js`にCSSローダー（css-loader, style-loader）の設定が必要
+- TypeScript型定義がないプラグインは`@ts-ignore`で回避
+
+### 使用方法
+
+**ワークフロー:**
+1. ステップ1-5を完了（プロセス定義～行列生成）
+2. ステップ6で2D可視化を確認（初回はノードサイズ均一）
+3. ステップ7でネットワーク分析を実行
+4. ステップ6に戻る → **ノードサイズがPageRankに応じて変化！**
+5. ノードをホバー → ツールチップでPageRank、媒介中心性が表示
+
+**操作方法:**
+- **ドラッグ**: ノードを自由に移動
+- **ホイール**: ズーム
+- **クリック**: ノード選択＆ハイライト
+- **ホバー**: ツールチップ表示
+- **+/-ボタン**: ズームコントロール（右下）
+- **PNG/SVG保存**: エクスポートボタン（サイドバー）
+
+### パフォーマンス
+
+**ビルドサイズ:**
+- bundle.js: 887 KiB（警告あり、実用上問題なし）
+
+**推奨:**
+- ノード数50以下: 快適
+- ノード数50-100: 問題なし
+- ノード数100+: レイアウトに時間がかかる場合あり
+
+### トラブルシューティング
+
+**問題: ツールチップが表示されない**
+- ビルドが正しく完了しているか確認（`build/bundle.*.js`が存在）
+- ブラウザコンソールでエラーを確認
+- `NETWORKMAPS_RELEASE=true`環境変数が設定されているか確認
+
+**問題: ノードサイズが変わらない**
+- ステップ7でネットワーク分析を実行したか確認
+- `st.session_state.network_metrics`が存在するか確認（Streamlit開発者ツール）
+- ページをリロードしてセッションをリセット
+
+**問題: エクスポートボタンが動作しない**
+- `window.exportCytoscapeImage`関数が定義されているか確認（ブラウザコンソール）
+- Cytoscape.jsインスタンスが正しく初期化されているか確認
+
 ## 進捗管理
 
 ### 進捗管理ファイル
@@ -509,7 +711,26 @@ npm run build
 - [x] タブ5: 行列分析・**ヒートマップ可視化** + **粒度調整提案**
   - matplotlib font設定による日本語文字化け修正
   - ラベル英語化（"Node Influence Heatmap", "To Node", "From Node"）
-- [x] タブ6: 3D/2D可視化
+- [x] タブ6: 3D/2D可視化 + **Neo4j並みインタラクティブ性** ✅ (2025-10-21実装)
+  - **Phase 1: 基本インタラクティブ性強化**
+    - ノードドラッグ&ドロップ（自由に配置変更）
+    - ツールチップ表示（ホバーでPageRank、媒介中心性、次数を表示）
+    - 選択ノードのハイライト（クリックで接続エッジ・ノードを強調）
+    - エッジの太さを動的に変更（スコア1-3:細、4-6:中、7-9:太）
+  - **Phase 4: ビジュアル&UX強化**
+    - レイアウトアニメーション（500msスムーズ遷移）
+    - ノードサイズの動的変更（PageRankに応じてサイズ調整: baseSize(30px) + pagerank × 150）
+    - PNG/SVGエクスポート（ボタンクリックで画像保存）
+    - ズームコントロールUI（cytoscape-panzoomプラグイン: +/-ボタン、フィット表示）
+  - **ステップ7との連携強化**
+    - ステップ7でPageRank、媒介中心性、入次数、出次数を`st.session_state.network_metrics`に保存
+    - ステップ6で保存されたメトリクスを取得し、2D可視化に反映
+    - ステップ6 ↔ ステップ7を行き来してもデータが保持される一貫性
+  - **技術スタック追加**
+    - Tippy.js（ツールチップ）
+    - cytoscape-popper（Cytoscape統合）
+    - cytoscape-panzoom（ズームコントロール）
+    - css-loader, style-loader（Webpackビルド）
 - [x] タブ7: NetworkX分析（PageRank、中心性） + **粒度調整提案**
 - [x] タブ8: DSM最適化（NSGA-II） + **LLMパラメータ評価** + **クラッシュ対策**
   - STEP-1: 設計パラメータ選択（コスト vs 自由度）
@@ -843,6 +1064,20 @@ plt.rcParams['axes.unicode_minus'] = False
 - [ ] `utils/refinement_analyzer.py`: 分析結果からの粒度調整提案ロジックを共通化
 - [ ] タブ8: 困難度指標ベースの粒度調整提案（STEP-2結果から検出）
 - [ ] タブ4: 推奨評価（隣接カテゴリ）のオプション実装
+
+### 2D可視化の追加改善候補（Phase 2-3、オプション）
+
+- [ ] **Phase 2: 詳細情報パネル**（2-3時間）
+  - 右側にサイドパネル追加（選択ノード情報を表示）
+  - IDEF0詳細表示（Input/Mechanism/Output、カテゴリ）
+  - 接続ノード一覧（「このノードへの影響」「このノードからの影響」）
+  - 中心性スコア表示（PageRank、次数、タブ7で計算済みなら）
+
+- [ ] **Phase 3: 検索・フィルタリング**（2-3時間）
+  - ノード名検索ボックス（入力でリアルタイム検索＆ハイライト）
+  - カテゴリ別フィルタリング（マルチセレクトで表示カテゴリ選択）
+  - ノードタイプフィルタ（Output/Mechanism/Inputの表示/非表示）
+  - スコア範囲スライダー（動的にエッジフィルタリング）
 
 ### 中期（バージョン管理）
 

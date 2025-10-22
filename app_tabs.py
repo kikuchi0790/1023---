@@ -1532,7 +1532,7 @@ def tab6_network_visualization():
     else:
         st.success("✅ ステップ5で生成された隣接行列を使用しています。")
     
-    viz_tab1, viz_tab2 = st.tabs(["🎮 3D可視化", "📊 2D可視化"])
+    viz_tab1, viz_tab2, viz_tab3 = st.tabs(["🎮 3D可視化 (NetworkMaps)", "📊 2D可視化 (Cytoscape)", "🏗️ OPMモデリング"])
     
     with viz_tab1:
         st.info("💡 3D空間でノード間の関係性を可視化します（要: 隣接行列データ）")
@@ -1638,6 +1638,13 @@ def tab6_network_visualization():
             from utils.cytoscape_bridge import convert_pim_to_cytoscape
             from components.cytoscape_viewer import cytoscape_2d_viewer
             
+            # ネットワークメトリクスを取得（ステップ7で計算済みの場合）
+            network_metrics = st.session_state.get("network_metrics", None)
+            if network_metrics:
+                st.success("✅ ステップ7のネットワーク分析結果を反映しています（ノードサイズ = PageRank）")
+            else:
+                st.info("💡 ステップ7でネットワーク分析を実行すると、ノードサイズがPageRankに応じて変化します")
+            
             col_viewer2d, col_controls2d = st.columns([3, 1])
             
             with col_controls2d:
@@ -1669,15 +1676,40 @@ def tab6_network_visualization():
                 st.caption("💡 操作方法")
                 st.markdown("""
                 **マウス操作:**
-                - 🖱️ ドラッグ: パン
+                - 🖱️ ドラッグ: ノード移動
                 - 🖱️ ホイール: ズーム
-                - 🖱️ クリック: ノード選択
+                - 🖱️ クリック: ノード選択&ハイライト
+                - ホバー: ツールチップ表示
                 
                 **色の意味:**
                 - 🟢 Output（成果物）
                 - 🔵 Mechanism（手段）
                 - 🟠 Input（材料・情報）
                 """)
+                
+                st.divider()
+                st.caption("📥 エクスポート")
+                col_png, col_svg = st.columns(2)
+                with col_png:
+                    if st.button("PNG保存", use_container_width=True, key="export_png_2d"):
+                        st.components.v1.html("""
+                        <script>
+                        if (window.exportCytoscapeImage) {
+                            window.exportCytoscapeImage('png');
+                        }
+                        </script>
+                        """, height=0)
+                        st.success("✅ PNGを保存しました")
+                with col_svg:
+                    if st.button("SVG保存", use_container_width=True, key="export_svg_2d"):
+                        st.components.v1.html("""
+                        <script>
+                        if (window.exportCytoscapeImage) {
+                            window.exportCytoscapeImage('svg');
+                        }
+                        </script>
+                        """, height=0)
+                        st.success("✅ SVGを保存しました")
             
             with col_viewer2d:
                 try:
@@ -1687,7 +1719,8 @@ def tab6_network_visualization():
                         categories=SessionManager.get_functional_categories(),
                         idef0_data=SessionManager.get_all_idef0_nodes(),
                         threshold=threshold,
-                        use_hierarchical_layout=(layout == "hierarchical")
+                        use_hierarchical_layout=(layout == "hierarchical"),
+                        network_metrics=network_metrics
                     )
                     
                     selected_node_2d = cytoscape_2d_viewer(
@@ -1695,6 +1728,7 @@ def tab6_network_visualization():
                         layout=layout,
                         height=700,
                         threshold=threshold,
+                        network_metrics=network_metrics,
                         key="pim_cytoscape_2d"
                     )
                     
@@ -1705,6 +1739,129 @@ def tab6_network_visualization():
                     st.error(f"2D可視化エラー: {str(e)}")
                     st.caption("**エラー詳細:**")
                     st.code(str(e), language="python")
+    
+    with viz_tab3:
+        st.info("💡 OPM（Object-Process Methodology）形式でネットワークを3D可視化します")
+        
+        if st.session_state.adjacency_matrix is not None:
+            from utils.opm_bridge import convert_pim_to_opm
+            from components.opm_viewer import opm_viewer
+            
+            col_viewer_opm, col_controls_opm = st.columns([3, 1])
+            
+            with col_controls_opm:
+                st.subheader("表示設定")
+                
+                scale_opm = st.slider(
+                    "空間のスケール",
+                    min_value=5.0,
+                    max_value=20.0,
+                    value=10.0,
+                    step=1.0,
+                    help="ノード間の距離を調整します",
+                    key="opm_scale"
+                )
+                
+                camera_mode_opm = st.radio(
+                    "カメラモード",
+                    options=["3d", "2d"],
+                    format_func=lambda x: "3D視点" if x == "3d" else "2D俯瞰",
+                    help="視点を切り替えます",
+                    key="opm_camera"
+                )
+                
+                enable_2d_view = st.checkbox(
+                    "2Dプロジェクション",
+                    value=False,
+                    help="Z軸をY軸に投影して2D表示",
+                    key="opm_2d_view"
+                )
+                
+                enable_edge_bundling = st.checkbox(
+                    "エッジバンドリング",
+                    value=False,
+                    help="エッジをベジェ曲線で描画",
+                    key="opm_edge_bundling"
+                )
+                
+                st.divider()
+                st.caption("💡 操作方法")
+                st.markdown("""
+                **マウス操作:**
+                - 🖱️ 左ドラッグ: 回転
+                - 🖱️ ホイール: ズーム
+                - 🖱️ 右ドラッグ: パン
+                - 🖱️ クリック: ノード選択
+                
+                **OPMの特徴:**
+                - レイヤー別のプレーン表示
+                - IDEF0タイプ別の色分け
+                - エッジスコアに応じた太さ
+                """)
+                
+                st.divider()
+                st.caption("📊 データ情報")
+                
+                # OPMデータプレビュー
+                if st.checkbox("OPMデータを表示", value=False, key="show_opm_data"):
+                    try:
+                        opm_data = convert_pim_to_opm(
+                            nodes=nodes,
+                            adjacency_matrix=st.session_state.adjacency_matrix,
+                            categories=SessionManager.get_functional_categories(),
+                            idef0_data=SessionManager.get_all_idef0_nodes(),
+                            scale=scale_opm
+                        )
+                        
+                        st.json({
+                            "layers": len(opm_data["layers"]),
+                            "nodes": len(opm_data["nodes"]),
+                            "edges": len(opm_data["edges"]),
+                            "planeData": opm_data["planeData"]
+                        })
+                    except Exception as e:
+                        st.error(f"変換エラー: {str(e)}")
+            
+            with col_viewer_opm:
+                try:
+                    opm_data = convert_pim_to_opm(
+                        nodes=nodes,
+                        adjacency_matrix=st.session_state.adjacency_matrix,
+                        categories=SessionManager.get_functional_categories(),
+                        idef0_data=SessionManager.get_all_idef0_nodes(),
+                        scale=scale_opm
+                    )
+                    
+                    opm_viewer(
+                        opm_data=opm_data,
+                        height=700,
+                        camera_mode=camera_mode_opm,
+                        enable_edit=False,
+                        enable_2d_view=enable_2d_view,
+                        enable_edge_bundling=enable_edge_bundling,
+                        key="pim_opm_viewer"
+                    )
+                    
+                    # 統計情報
+                    st.markdown("### 📊 OPM統計")
+                    col_stat1, col_stat2, col_stat3 = st.columns(3)
+                    with col_stat1:
+                        st.metric("レイヤー数", len(opm_data["layers"]))
+                    with col_stat2:
+                        st.metric("ノード数", len(opm_data["nodes"]))
+                    with col_stat3:
+                        st.metric("エッジ数", len(opm_data["edges"]))
+                
+                except Exception as e:
+                    st.error(f"OPM可視化エラー: {str(e)}")
+                    st.caption("**エラー詳細:**")
+                    st.code(str(e), language="python")
+                    
+                    # デバッグ情報
+                    if st.checkbox("デバッグ情報を表示", value=False, key="opm_debug"):
+                        st.markdown("**ノード数:**", len(nodes) if nodes else 0)
+                        st.markdown("**カテゴリ数:**", len(SessionManager.get_functional_categories()))
+                        st.markdown("**隣接行列形状:**", str(st.session_state.adjacency_matrix.shape) if st.session_state.adjacency_matrix is not None else "None")
 
 
 def tab7_network_analysis():
@@ -1848,6 +2005,17 @@ def tab7_network_analysis():
         
         df_analysis = pd.DataFrame(analysis_data)
         
+        # ネットワークメトリクスを保存（ステップ6の2D可視化で使用）
+        network_metrics = {}
+        for node in nodes:
+            network_metrics[node] = {
+                "pagerank": pagerank.get(node, 0),
+                "betweenness": betweenness.get(node, 0),
+                "in_degree": in_degree.get(node, 0),
+                "out_degree": out_degree.get(node, 0)
+            }
+        st.session_state.network_metrics = network_metrics
+        
         # ソートオプション
         sort_by = st.selectbox(
             "並び替え基準",
@@ -1942,6 +2110,140 @@ def tab7_network_analysis():
     
     else:
         st.info("👆 「ネットワークを生成して分析」ボタンをクリックして開始してください")
+
+
+def _visualize_dsm_network_before_after(dsm_data, removed_indices):
+    """STEP-1のDP削除前後のネットワーク構造を可視化
+    
+    Args:
+        dsm_data: PIMDSMDataインスタンス
+        removed_indices: 削除されるDPのインデックスリスト（reordered_nodes基準）
+    
+    Returns:
+        matplotlib.figure.Figure
+    """
+    import networkx as nx
+    import matplotlib.pyplot as plt
+    
+    # 日本語フォント設定
+    plt.rcParams['font.sans-serif'] = ['Hiragino Sans', 'Yu Gothic', 'Meiryo', 'DejaVu Sans']
+    plt.rcParams['axes.unicode_minus'] = False
+    
+    # グラフ構築（隣接行列から）
+    adj_matrix = dsm_data.adj_matrix_df.values
+    nodes = dsm_data.reordered_nodes
+    
+    G = nx.DiGraph()
+    
+    # ノード追加（属性付き）
+    for i, node_name in enumerate(nodes):
+        is_fr = i < dsm_data.fn_num
+        is_removed = i in removed_indices
+        G.add_node(node_name, is_fr=is_fr, is_removed=is_removed, index=i)
+    
+    # エッジ追加（スコア != 0 のみ）
+    for i in range(len(nodes)):
+        for j in range(len(nodes)):
+            if i != j and adj_matrix[i, j] != 0:
+                G.add_edge(nodes[i], nodes[j], weight=abs(adj_matrix[i, j]))
+    
+    # レイアウト計算（spring layout）
+    pos = nx.spring_layout(G, k=1.5, iterations=50, seed=42)
+    
+    # 2つのサブプロット
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 7))
+    
+    # === サブプロット1: 削除前（削除DPをハイライト） ===
+    ax1.set_title('削除前（全ノード - 削除予定を強調）', fontsize=14, fontweight='bold')
+    
+    # ノードを分類
+    removed_nodes = [nodes[i] for i in removed_indices]
+    fr_nodes = [node for node in G.nodes() if G.nodes[node]['is_fr']]
+    keep_dp_nodes = [node for node in G.nodes() if not G.nodes[node]['is_fr'] and not G.nodes[node]['is_removed']]
+    remove_dp_nodes = [node for node in G.nodes() if G.nodes[node]['is_removed']]
+    
+    # 通常のノード描画（FR + 残るDP）
+    if fr_nodes:
+        nx.draw_networkx_nodes(G, pos, ax=ax1, nodelist=fr_nodes,
+                              node_color='#70e483', node_size=300, alpha=0.9,
+                              edgecolors='black', linewidths=1.5)
+    if keep_dp_nodes:
+        nx.draw_networkx_nodes(G, pos, ax=ax1, nodelist=keep_dp_nodes,
+                              node_color='#3bc3ff', node_size=300, alpha=0.9,
+                              edgecolors='black', linewidths=1.5)
+    
+    # 削除予定DPを強調表示（星形、大きいサイズ、赤色、太枠）
+    if remove_dp_nodes:
+        nx.draw_networkx_nodes(G, pos, ax=ax1, nodelist=remove_dp_nodes,
+                              node_color='#ff3333', node_size=450, alpha=1.0,
+                              node_shape='*', edgecolors='#990000', linewidths=3.0)
+    
+    # エッジ描画（削除DPに関連するエッジを赤で強調）
+    normal_edges = [(u, v) for u, v in G.edges() if u not in removed_nodes and v not in removed_nodes]
+    highlight_edges = [(u, v) for u, v in G.edges() if u in removed_nodes or v in removed_nodes]
+    
+    # 通常のエッジ（灰色）
+    nx.draw_networkx_edges(G, pos, ax=ax1, edgelist=normal_edges, alpha=0.3,
+                          arrows=True, arrowsize=10, edge_color='gray', width=1)
+    
+    # 削除DPに関連するエッジ（赤色で強調）
+    nx.draw_networkx_edges(G, pos, ax=ax1, edgelist=highlight_edges, alpha=0.7,
+                          arrows=True, arrowsize=10, edge_color='#ff3333', width=2.5)
+    
+    # ラベル描画
+    nx.draw_networkx_labels(G, pos, ax=ax1, font_size=7, font_family='sans-serif')
+    
+    ax1.axis('off')
+    
+    # === サブプロット2: 削除後（削除DPを完全に非表示） ===
+    ax2.set_title('削除後（残存ネットワーク）', fontsize=14, fontweight='bold')
+    
+    # 残存ノードのみを取得
+    remaining_nodes = [node for node in G.nodes() if not G.nodes[node]['is_removed']]
+    remaining_fr_nodes = [node for node in remaining_nodes if G.nodes[node]['is_fr']]
+    remaining_dp_nodes = [node for node in remaining_nodes if not G.nodes[node]['is_fr']]
+    
+    # 残存ノードのみ描画
+    if remaining_fr_nodes:
+        nx.draw_networkx_nodes(G, pos, ax=ax2, nodelist=remaining_fr_nodes,
+                              node_color='#70e483', node_size=300, alpha=0.9,
+                              edgecolors='black', linewidths=1.5)
+    if remaining_dp_nodes:
+        nx.draw_networkx_nodes(G, pos, ax=ax2, nodelist=remaining_dp_nodes,
+                              node_color='#3bc3ff', node_size=300, alpha=0.9,
+                              edgecolors='black', linewidths=1.5)
+    
+    # 残存ノード間のエッジのみ描画
+    removed_nodes_set = set(removed_nodes)
+    remaining_edges = [(u, v) for u, v in G.edges() 
+                      if u not in removed_nodes_set and v not in removed_nodes_set]
+    
+    if remaining_edges:
+        nx.draw_networkx_edges(G, pos, ax=ax2, edgelist=remaining_edges, alpha=0.5,
+                              arrows=True, arrowsize=10, edge_color='gray', width=1.5)
+    
+    # 残存ノードのラベルのみ描画
+    remaining_labels = {node: node for node in remaining_nodes}
+    nx.draw_networkx_labels(G, pos, ax=ax2, labels=remaining_labels, 
+                           font_size=7, font_family='sans-serif')
+    
+    ax2.axis('off')
+    
+    # 凡例
+    from matplotlib.patches import Patch
+    from matplotlib.lines import Line2D
+    legend_elements = [
+        Patch(facecolor='#70e483', edgecolor='black', label='FR (Output)'),
+        Patch(facecolor='#3bc3ff', edgecolor='black', label='DP（残る）'),
+        Line2D([0], [0], marker='*', color='w', markerfacecolor='#ff3333', 
+               markersize=15, markeredgecolor='#990000', markeredgewidth=2, label='DP（削除予定）'),
+    ]
+    fig.legend(handles=legend_elements, loc='upper center', ncol=3, fontsize=10, 
+              bbox_to_anchor=(0.5, 0.98))
+    
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    
+    return fig
 
 
 def tab8_dsm_optimization():
@@ -2136,6 +2438,14 @@ def tab8_dsm_optimization():
     with col_p2:
         step1_gen = st.slider("世代数", 20, 200, default_gen, 10, key="step1_gen")
     
+    # 並列化オプション
+    use_parallel_s1 = st.checkbox(
+        "🚀 並列化を有効化（実験的、2-4倍高速化）",
+        value=False,
+        help="複数CPUコアを使用して高速化します。環境によっては不安定な場合があります。",
+        key="use_parallel_s1"
+    )
+    
     # データ構築（ボタンの外で準備）
     llm_params = st.session_state.get("dsm_llm_params") if param_mode == "llm_auto" else None
     
@@ -2168,7 +2478,7 @@ def tab8_dsm_optimization():
                 )
             
             # STEP-1実行（同期）
-            step1 = PIMStep1NSGA2(dsm_data)
+            step1 = PIMStep1NSGA2(dsm_data, use_parallel=use_parallel_s1)
             pareto_front = step1.run(
                 n_pop=step1_pop,
                 n_gen=step1_gen,
@@ -2263,12 +2573,57 @@ def tab8_dsm_optimization():
                 with col3:
                     st.metric("削除DP数", selected['removed_count'])
                 
-                if selected['removed_nodes']:
-                    st.markdown("**削除される設計パラメータ:**")
-                    for node in selected['removed_nodes']:
-                        st.caption(f"- {node}")
-                else:
-                    st.info("すべての設計パラメータが保持されます")
+                st.markdown("---")
+                st.markdown("#### ネットワーク構造の変化")
+                
+                # ネットワーク可視化
+                dsm_data = st.session_state.dsm_data
+                removed_indices = [i for i, val in enumerate(selected['individual']) if val == 1]
+                
+                try:
+                    fig_network = _visualize_dsm_network_before_after(dsm_data, removed_indices)
+                    st.pyplot(fig_network)
+                    plt.close()
+                except Exception as e:
+                    st.warning(f"ネットワーク可視化エラー: {str(e)}")
+                
+                st.markdown("---")
+                st.markdown("#### 設計パラメータの詳細")
+                
+                # 2カラムで削除/残るDPを表示
+                col_list1, col_list2 = st.columns(2)
+                
+                with col_list1:
+                    st.markdown("**削除されるDP:**")
+                    if selected['removed_nodes']:
+                        for node in selected['removed_nodes']:
+                            st.caption(f"❌ {node}")
+                    else:
+                        st.info("削除なし")
+                
+                with col_list2:
+                    st.markdown("**残るDP:**")
+                    remaining_dps = [dsm_data.reordered_nodes[i] for i in range(dsm_data.fn_num, len(dsm_data.reordered_nodes)) 
+                                    if i not in removed_indices]
+                    if remaining_dps:
+                        for node in remaining_dps:
+                            st.caption(f"✅ {node}")
+                    else:
+                        st.warning("全てのDPが削除されます")
+                
+                st.markdown("---")
+                st.markdown("#### 統計情報")
+                
+                col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+                with col_s1:
+                    st.metric("削除前DP数", dsm_data.dp_num)
+                with col_s2:
+                    st.metric("削除後DP数", dsm_data.dp_num - selected['removed_count'])
+                with col_s3:
+                    st.metric("削除数", selected['removed_count'])
+                with col_s4:
+                    deletion_rate = (selected['removed_count'] / dsm_data.dp_num * 100) if dsm_data.dp_num > 0 else 0
+                    st.metric("削除率", f"{deletion_rate:.1f}%")
             
             # 選択を保存
             st.session_state.step1_selected_idx = selected_idx
@@ -2278,208 +2633,431 @@ def tab8_dsm_optimization():
         st.markdown("---")
         st.subheader("8.3. STEP-2: 依存関係方向決定")
         
-        st.markdown("""
-        残った設計パラメータ間の依存関係の方向を最適化します。
-        - **目的1**: 調整困難度最小化（αパターン + γパターン）
-        - **目的2**: 競合困難度最小化（列への複数影響の相乗効果）
-        - **目的3**: ループ困難度最小化（閉路の累積影響）
-        """)
+        st.info("💡 STEP-2.AとSTEP-2.Bは独立して実行できます。どちらを先に実行してもかまいません。")
         
-        # 軽量モード（STEP-2）
-        lightweight_mode_s2 = st.checkbox(
-            "⚡ 軽量モード（推奨）",
-            value=True,
-            help="個体数と世代数を削減し、サーバークラッシュを防ぎます",
-            key="lightweight_s2"
-        )
+        # タブ形式に変更
+        tab_step2a, tab_step2b = st.tabs([
+            "📊 STEP-2.A: 3目的関数（標準）",
+            "⚡ STEP-2.B: 2目的×3ペア（高速）"
+        ])
         
-        if lightweight_mode_s2:
-            default_pop_s2, default_gen_s2 = 100, 30
-        else:
-            default_pop_s2, default_gen_s2 = 200, 50
-        
-        col_p3, col_p4 = st.columns(2)
-        with col_p3:
-            step2_pop = st.slider("個体数", 50, 500, default_pop_s2, 50, key="step2_pop")
-        with col_p4:
-            step2_gen = st.slider("世代数", 20, 200, default_gen_s2, 10, key="step2_gen")
-        
-        if st.button("🚀 STEP-2を実行", type="primary", use_container_width=True):
-            from utils.dsm_optimizer import PIMStep2NSGA2
-            import time
+        # ============================================================
+        # STEP-2.A タブ
+        # ============================================================
+        with tab_step2a:
+            st.markdown("""
+            残った設計パラメータ間の依存関係の方向を最適化します。
+            - **目的1**: 調整困難度最小化（αパターン + γパターン）
+            - **目的2**: 競合困難度最小化（列への複数影響の相乗効果）
+            - **目的3**: ループ困難度最小化（閉路の累積影響）
+            """)
+            # 軽量モード（STEP-2）
+            lightweight_mode_s2 = st.checkbox(
+                "⚡ 軽量モード（推奨）",
+                value=True,
+                help="個体数と世代数を削減し、サーバークラッシュを防ぎます",
+                key="lightweight_s2"
+            )
             
-            progress_placeholder = st.empty()
-            status_placeholder = st.empty()
+            if lightweight_mode_s2:
+                default_pop_s2, default_gen_s2 = 100, 30
+            else:
+                default_pop_s2, default_gen_s2 = 200, 50
             
-            # 初期メッセージ
-            status_placeholder.info(f"🚀 NSGA-II最適化を開始しました（{step2_pop}個体 × {step2_gen}世代）...")
+            col_p3, col_p4 = st.columns(2)
+            with col_p3:
+                step2_pop = st.slider("個体数", 50, 500, default_pop_s2, 50, key="step2_pop")
+            with col_p4:
+                step2_gen = st.slider("世代数", 20, 200, default_gen_s2, 10, key="step2_gen")
             
-            with st.spinner("最適化実行中... 進捗は下のプログレスバーで確認できます"):
+            # 並列化オプション
+            use_parallel_s2 = st.checkbox(
+                "🚀 並列化を有効化（実験的、2-4倍高速化）",
+                value=False,
+                help="複数CPUコアを使用して高速化します。環境によっては不安定な場合があります。",
+                key="use_parallel_s2"
+            )
+            
+            if st.button("🚀 STEP-2.Aを実行", type="primary", use_container_width=True, key="run_step2a"):
+                from utils.dsm_optimizer import PIMStep2NSGA2
+                import time
+                
+                progress_placeholder = st.empty()
+                status_placeholder = st.empty()
+                
+                # 初期メッセージ
+                status_placeholder.info(f"🚀 NSGA-II最適化を開始しました（{step2_pop}個体 × {step2_gen}世代）...")
+                
+                with st.spinner("最適化実行中... 進捗は下のプログレスバーで確認できます"):
+                    try:
+                        start_time = time.time()
+                        gen_times = []
+                        
+                        dsm_data = st.session_state.dsm_data
+                        selected = st.session_state.step1_results[st.session_state.step1_selected_idx]
+                        removed_indices = [i for i, val in enumerate(selected['individual']) if val == 1]
+                        
+                        # 進捗コールバック
+                        def progress_callback(gen: int, pareto_size: int):
+                            progress_pct = gen / step2_gen
+                            
+                            # 推定残り時間計算
+                            if gen > 0:
+                                elapsed = time.time() - start_time
+                                avg_time_per_gen = elapsed / gen
+                                remaining_gens = step2_gen - gen
+                                eta_seconds = avg_time_per_gen * remaining_gens
+                                eta_min = int(eta_seconds // 60)
+                                eta_sec = int(eta_seconds % 60)
+                                eta_text = f" | 推定残り時間: {eta_min}分{eta_sec}秒"
+                            else:
+                                eta_text = ""
+                            
+                            progress_placeholder.progress(
+                                progress_pct,
+                                text=f"世代 {gen}/{step2_gen} (パレート解: {pareto_size}個){eta_text}"
+                            )
+                        
+                        # STEP-2実行（同期）
+                        step2 = PIMStep2NSGA2(dsm_data, removed_indices, use_parallel=use_parallel_s2)
+                        pareto_front = step2.run(
+                            n_pop=step2_pop,
+                            n_gen=step2_gen,
+                            checkpoint_id=None,
+                            save_every=1,
+                            progress_callback=progress_callback
+                        )
+                        
+                        elapsed = time.time() - start_time
+                        
+                        # 結果をリスト化
+                        step2_results = []
+                        for ind in pareto_front:
+                            adj, conf, loop = ind.fitness.values
+                            step2_results.append({
+                                'matrix': ind[0].copy(),
+                                'adjustment': adj,
+                                'conflict': conf,
+                                'loop': loop
+                            })
+                        
+                        st.session_state.step2_results = step2_results
+                        st.session_state.step2_package = step2.pkg
+                        
+                        progress_placeholder.empty()
+                        elapsed_min = int(elapsed // 60)
+                        elapsed_sec = int(elapsed % 60)
+                        status_placeholder.success(f"✅ STEP-2完了: {len(pareto_front)}個のパレート解を発見（{elapsed_min}分{elapsed_sec}秒）")
+                        
+                    except Exception as e:
+                        progress_placeholder.empty()
+                        status_placeholder.error(f"❌ エラー: {str(e)}")
+                        import traceback
+                        st.code(traceback.format_exc(), language="python")
+            
+            # STEP-2結果の可視化
+            if "step2_results" in st.session_state and st.session_state.step2_results:
+                results2 = st.session_state.step2_results
+                
+                st.markdown("#### パレートフロント（3D）")
+            
+                # 日本語フォント設定
+                plt.rcParams['font.sans-serif'] = ['Hiragino Sans', 'Yu Gothic', 'Meiryo', 'DejaVu Sans']
+                plt.rcParams['axes.unicode_minus'] = False
+                
+                # 3D散布図
+                from mpl_toolkits.mplot3d import Axes3D
+                
+                fig = plt.figure(figsize=(12, 8))
+                ax = fig.add_subplot(111, projection='3d')
+                
+                adjs = [r['adjustment'] for r in results2]
+                confs = [r['conflict'] for r in results2]
+                loops = [r['loop'] for r in results2]
+                
+                scatter = ax.scatter(adjs, confs, loops, c=range(len(results2)), cmap='plasma', s=100, alpha=0.7)
+                ax.set_xlabel('調整困難度', fontsize=10)
+                ax.set_ylabel('競合困難度', fontsize=10)
+                ax.set_zlabel('ループ困難度', fontsize=10)
+                ax.set_title('STEP-2 パレートフロント', fontsize=14)
+                plt.colorbar(scatter, ax=ax, label='解番号', shrink=0.5)
+                
+                st.pyplot(fig)
+                plt.close()
+                
+                # 解選択
+                st.markdown("#### 解の選択")
+                
+                df_results2 = pd.DataFrame([{
+                    '解番号': i,
+                    '調整困難度': f"{r['adjustment']:.2f}",
+                    '競合困難度': f"{r['conflict']:.2f}",
+                    'ループ困難度': f"{r['loop']:.2f}"
+                } for i, r in enumerate(results2)])
+                
+                st.dataframe(df_results2, use_container_width=True, hide_index=True)
+                
+                selected_idx2 = st.selectbox(
+                    "最終解を選択",
+                    options=list(range(len(results2))),
+                    format_func=lambda i: f"解{i}: 調整={results2[i]['adjustment']:.2f}, 競合={results2[i]['conflict']:.2f}, ループ={results2[i]['loop']:.2f}"
+                )
+                
+                if selected_idx2 is not None:
+                    selected2 = results2[selected_idx2]
+                    pkg = st.session_state.step2_package
+                    
+                    with st.expander(f"📊 解{selected_idx2}の詳細", expanded=True):
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("調整困難度", f"{selected2['adjustment']:.2f}")
+                        with col2:
+                            st.metric("競合困難度", f"{selected2['conflict']:.2f}")
+                        with col3:
+                            st.metric("ループ困難度", f"{selected2['loop']:.2f}")
+                        
+                        st.markdown("**最適化されたDSM:**")
+                        
+                        # ヒートマップ
+                        optimized_matrix = selected2['matrix']
+                        node_names = [pkg['node_name'][0][i] for i in range(pkg['matrix_size'])]
+                        
+                        df_optimized = pd.DataFrame(
+                            optimized_matrix,
+                            index=node_names,
+                            columns=node_names
+                        )
+                        
+                        fig, ax = plt.subplots(figsize=(12, 10))
+                        
+                        # 日本語フォント設定
+                        plt.rcParams['font.sans-serif'] = ['Hiragino Sans', 'Yu Gothic', 'Meiryo', 'DejaVu Sans']
+                        plt.rcParams['axes.unicode_minus'] = False
+                        
+                        sns.heatmap(
+                            df_optimized,
+                            annot=True,
+                            fmt='.0f',
+                            cmap='coolwarm',
+                            center=0,
+                            vmin=-9,
+                            vmax=9,
+                            linewidths=0.5,
+                            cbar_kws={'label': '影響スコア'},
+                            ax=ax
+                        )
+                        ax.set_title('最適化されたDSM', fontsize=14, pad=20)
+                        
+                        st.pyplot(fig)
+                        plt.close()
+                    
+                    # 選択を保存
+                    st.session_state.step2_selected_idx = selected_idx2
+                    st.session_state.optimized_dsm = selected2['matrix']
+        
+        # ============================================================
+        # STEP-2.B タブ
+        # ============================================================
+        with tab_step2b:
+            st.markdown("""
+            3つのペアを順次最適化します（2目的なので高速）:
+            1. **調整困難度 vs 競合困難度**
+            2. **調整困難度 vs ループ困難度**
+            3. **競合困難度 vs ループ困難度**
+            """)
+            # パラメータ設定
+            col_pb1, col_pb2 = st.columns(2)
+            with col_pb1:
+                step2b_pop = st.slider("個体数", 50, 300, 100, 50, key="step2b_pop")
+            with col_pb2:
+                step2b_gen = st.slider("世代数", 10, 100, 30, 10, key="step2b_gen")
+            
+            use_parallel_s2b = st.checkbox(
+                "🚀 並列化を有効化（実験的）",
+                value=False,
+                help="複数CPUコアを使用して高速化します",
+                key="use_parallel_s2b"
+            )
+            
+            if st.button("🚀 STEP-2.Bを実行（3ペア順次実行）", type="primary", use_container_width=True, key="run_step2b"):
+                from utils.dsm_optimizer import PIMStep2PairwiseNSGA2
+                import time
+                
+                progress_placeholder = st.empty()
+                status_placeholder = st.empty()
+                
                 try:
                     start_time = time.time()
-                    gen_times = []
                     
                     dsm_data = st.session_state.dsm_data
                     selected = st.session_state.step1_results[st.session_state.step1_selected_idx]
                     removed_indices = [i for i, val in enumerate(selected['individual']) if val == 1]
                     
                     # 進捗コールバック
-                    def progress_callback(gen: int, pareto_size: int):
-                        progress_pct = gen / step2_gen
-                        
-                        # 推定残り時間計算
-                        if gen > 0:
-                            elapsed = time.time() - start_time
-                            avg_time_per_gen = elapsed / gen
-                            remaining_gens = step2_gen - gen
-                            eta_seconds = avg_time_per_gen * remaining_gens
-                            eta_min = int(eta_seconds // 60)
-                            eta_sec = int(eta_seconds % 60)
-                            eta_text = f" | 推定残り時間: {eta_min}分{eta_sec}秒"
-                        else:
-                            eta_text = ""
-                        
-                        progress_placeholder.progress(
-                            progress_pct,
-                            text=f"世代 {gen}/{step2_gen} (パレート解: {pareto_size}個){eta_text}"
-                        )
+                    def progress_callback(pair_name: str, gen: int, pareto_size: int):
+                        progress_text = f"{pair_name}: 世代 {gen}/{step2b_gen} (パレート解: {pareto_size}個)"
+                        progress_placeholder.info(progress_text)
                     
-                    # STEP-2実行（同期）
-                    step2 = PIMStep2NSGA2(dsm_data, removed_indices)
-                    pareto_front = step2.run(
-                        n_pop=step2_pop,
-                        n_gen=step2_gen,
-                        checkpoint_id=None,
-                        save_every=1,
+                    status_placeholder.info(f"🚀 3ペアの最適化を開始します（{step2b_pop}個体 × {step2b_gen}世代 × 3ペア）...")
+                    
+                    # STEP-2.B実行
+                    step2b = PIMStep2PairwiseNSGA2(dsm_data, removed_indices, use_parallel=use_parallel_s2b)
+                    pairwise_results = step2b.run_pairwise(
+                        n_pop=step2b_pop,
+                        n_gen=step2b_gen,
                         progress_callback=progress_callback
                     )
                     
                     elapsed = time.time() - start_time
                     
-                    # 結果をリスト化
-                    step2_results = []
-                    for ind in pareto_front:
-                        adj, conf, loop = ind.fitness.values
-                        step2_results.append({
-                            'matrix': ind[0].copy(),
-                            'adjustment': adj,
-                            'conflict': conf,
-                            'loop': loop
-                        })
+                    # 結果を整形して保存
+                    step2b_results = {}
+                    for pair_key, (pareto_front, objectives) in pairwise_results.items():
+                        results_list = []
+                        for ind in pareto_front:
+                            obj1, obj2 = ind.fitness.values
+                            results_list.append({
+                                'matrix': ind[0].copy(),
+                                'obj1': obj1,
+                                'obj2': obj2,
+                                'obj1_name': objectives[0],
+                                'obj2_name': objectives[1]
+                            })
+                        step2b_results[pair_key] = {
+                            'results': results_list,
+                            'objectives': objectives
+                        }
                     
-                    st.session_state.step2_results = step2_results
-                    st.session_state.step2_package = step2.pkg
+                    st.session_state.step2b_results = step2b_results
+                    st.session_state.step2b_package = step2b.pkg
                     
                     progress_placeholder.empty()
                     elapsed_min = int(elapsed // 60)
                     elapsed_sec = int(elapsed % 60)
-                    status_placeholder.success(f"✅ STEP-2完了: {len(pareto_front)}個のパレート解を発見（{elapsed_min}分{elapsed_sec}秒）")
+                    total_solutions = sum(len(v['results']) for v in step2b_results.values())
+                    status_placeholder.success(f"✅ STEP-2.B完了: 合計{total_solutions}個のパレート解を発見（{elapsed_min}分{elapsed_sec}秒）")
                     
                 except Exception as e:
                     progress_placeholder.empty()
                     status_placeholder.error(f"❌ エラー: {str(e)}")
                     import traceback
                     st.code(traceback.format_exc(), language="python")
-        
-        # STEP-2結果の可視化
-        if "step2_results" in st.session_state and st.session_state.step2_results:
-            results2 = st.session_state.step2_results
             
-            st.markdown("#### パレートフロント（3D）")
-            
-            # 日本語フォント設定
-            plt.rcParams['font.sans-serif'] = ['Hiragino Sans', 'Yu Gothic', 'Meiryo', 'DejaVu Sans']
-            plt.rcParams['axes.unicode_minus'] = False
-            
-            # 3D散布図
-            from mpl_toolkits.mplot3d import Axes3D
-            
-            fig = plt.figure(figsize=(12, 8))
-            ax = fig.add_subplot(111, projection='3d')
-            
-            adjs = [r['adjustment'] for r in results2]
-            confs = [r['conflict'] for r in results2]
-            loops = [r['loop'] for r in results2]
-            
-            scatter = ax.scatter(adjs, confs, loops, c=range(len(results2)), cmap='plasma', s=100, alpha=0.7)
-            ax.set_xlabel('調整困難度', fontsize=10)
-            ax.set_ylabel('競合困難度', fontsize=10)
-            ax.set_zlabel('ループ困難度', fontsize=10)
-            ax.set_title('STEP-2 パレートフロント', fontsize=14)
-            plt.colorbar(scatter, ax=ax, label='解番号', shrink=0.5)
-            
-            st.pyplot(fig)
-            plt.close()
-            
-            # 解選択
-            st.markdown("#### 解の選択")
-            
-            df_results2 = pd.DataFrame([{
-                '解番号': i,
-                '調整困難度': f"{r['adjustment']:.2f}",
-                '競合困難度': f"{r['conflict']:.2f}",
-                'ループ困難度': f"{r['loop']:.2f}"
-            } for i, r in enumerate(results2)])
-            
-            st.dataframe(df_results2, use_container_width=True, hide_index=True)
-            
-            selected_idx2 = st.selectbox(
-                "最終解を選択",
-                options=list(range(len(results2))),
-                format_func=lambda i: f"解{i}: 調整={results2[i]['adjustment']:.2f}, 競合={results2[i]['conflict']:.2f}, ループ={results2[i]['loop']:.2f}"
-            )
-            
-            if selected_idx2 is not None:
-                selected2 = results2[selected_idx2]
-                pkg = st.session_state.step2_package
+            # STEP-2.B結果の可視化（3タブ）
+            if "step2b_results" in st.session_state and st.session_state.step2b_results:
+                st.markdown("#### パレートフロント（3ペア）")
                 
-                with st.expander(f"📊 解{selected_idx2}の詳細", expanded=True):
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("調整困難度", f"{selected2['adjustment']:.2f}")
-                    with col2:
-                        st.metric("競合困難度", f"{selected2['conflict']:.2f}")
-                    with col3:
-                        st.metric("ループ困難度", f"{selected2['loop']:.2f}")
-                    
-                    st.markdown("**最適化されたDSM:**")
-                    
-                    # ヒートマップ
-                    optimized_matrix = selected2['matrix']
-                    node_names = [pkg['node_name'][0][i] for i in range(pkg['matrix_size'])]
-                    
-                    df_optimized = pd.DataFrame(
-                        optimized_matrix,
-                        index=node_names,
-                        columns=node_names
-                    )
-                    
-                    fig, ax = plt.subplots(figsize=(12, 10))
-                    
-                    # 日本語フォント設定
-                    plt.rcParams['font.sans-serif'] = ['Hiragino Sans', 'Yu Gothic', 'Meiryo', 'DejaVu Sans']
-                    plt.rcParams['axes.unicode_minus'] = False
-                    
-                    sns.heatmap(
-                        df_optimized,
-                        annot=True,
-                        fmt='.0f',
-                        cmap='coolwarm',
-                        center=0,
-                        vmin=-9,
-                        vmax=9,
-                        linewidths=0.5,
-                        cbar_kws={'label': '影響スコア'},
-                        ax=ax
-                    )
-                    ax.set_title('最適化されたDSM', fontsize=14, pad=20)
-                    
-                    st.pyplot(fig)
-                    plt.close()
+                tab_pair1, tab_pair2, tab_pair3 = st.tabs([
+                    "ペア1: 調整 vs 競合",
+                    "ペア2: 調整 vs ループ",
+                    "ペア3: 競合 vs ループ"
+                ])
                 
-                # 選択を保存
-                st.session_state.step2_selected_idx = selected_idx2
-                st.session_state.optimized_dsm = selected2['matrix']
+                pair_keys = ['adj_conf', 'adj_loop', 'conf_loop']
+                pair_tabs = [tab_pair1, tab_pair2, tab_pair3]
+                pair_labels = {
+                    'adjustment': '調整困難度',
+                    'conflict': '競合困難度',
+                    'loop': 'ループ困難度'
+                }
+                
+                for pair_key, tab in zip(pair_keys, pair_tabs):
+                    with tab:
+                        pair_data = st.session_state.step2b_results[pair_key]
+                        results_list = pair_data['results']
+                        objectives = pair_data['objectives']
+                        
+                        obj1_label = pair_labels[objectives[0]]
+                        obj2_label = pair_labels[objectives[1]]
+                        
+                        # 2D散布図
+                        fig, ax = plt.subplots(figsize=(10, 6))
+                        
+                        plt.rcParams['font.sans-serif'] = ['Hiragino Sans', 'Yu Gothic', 'Meiryo', 'DejaVu Sans']
+                        plt.rcParams['axes.unicode_minus'] = False
+                        
+                        obj1_vals = [r['obj1'] for r in results_list]
+                        obj2_vals = [r['obj2'] for r in results_list]
+                        
+                        scatter = ax.scatter(obj1_vals, obj2_vals, c=range(len(results_list)), cmap='viridis', s=100, alpha=0.7)
+                        ax.set_xlabel(obj1_label, fontsize=12)
+                        ax.set_ylabel(obj2_label, fontsize=12)
+                        ax.set_title(f'{obj1_label} vs {obj2_label}', fontsize=14)
+                        ax.grid(True, alpha=0.3)
+                        plt.colorbar(scatter, ax=ax, label='解番号')
+                        
+                        st.pyplot(fig)
+                        plt.close()
+                        
+                        # 解選択
+                        st.markdown("#### 解の選択")
+                        
+                        df_pair = pd.DataFrame([{
+                            '解番号': i,
+                            obj1_label: f"{r['obj1']:.2f}",
+                            obj2_label: f"{r['obj2']:.2f}"
+                        } for i, r in enumerate(results_list)])
+                        
+                        st.dataframe(df_pair, use_container_width=True, hide_index=True)
+                        
+                        selected_pair_idx = st.selectbox(
+                            "解を選択",
+                            options=list(range(len(results_list))),
+                            format_func=lambda i: f"解{i}: {obj1_label}={results_list[i]['obj1']:.2f}, {obj2_label}={results_list[i]['obj2']:.2f}",
+                            key=f"select_{pair_key}"
+                        )
+                        
+                        if selected_pair_idx is not None:
+                            selected_pair = results_list[selected_pair_idx]
+                            pkg = st.session_state.step2b_package
+                            
+                            with st.expander(f"📊 解{selected_pair_idx}の詳細", expanded=True):
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    st.metric(obj1_label, f"{selected_pair['obj1']:.2f}")
+                                with col2:
+                                    st.metric(obj2_label, f"{selected_pair['obj2']:.2f}")
+                                
+                                st.markdown("**最適化されたDSM:**")
+                                
+                                # ヒートマップ
+                                optimized_matrix = selected_pair['matrix']
+                                node_names = [pkg['node_name'][0][i] for i in range(pkg['matrix_size'])]
+                                
+                                df_optimized = pd.DataFrame(
+                                    optimized_matrix,
+                                    index=node_names,
+                                    columns=node_names
+                                )
+                                
+                                fig, ax = plt.subplots(figsize=(12, 10))
+                                
+                                plt.rcParams['font.sans-serif'] = ['Hiragino Sans', 'Yu Gothic', 'Meiryo', 'DejaVu Sans']
+                                plt.rcParams['axes.unicode_minus'] = False
+                                
+                                sns.heatmap(
+                                    df_optimized,
+                                    annot=True,
+                                    fmt='.0f',
+                                    cmap='coolwarm',
+                                    center=0,
+                                    vmin=-9,
+                                    vmax=9,
+                                    linewidths=0.5,
+                                    cbar_kws={'label': '影響スコア'},
+                                    ax=ax
+                                )
+                                ax.set_title(f'最適化されたDSM ({obj1_label} vs {obj2_label})', fontsize=14, pad=20)
+                                
+                                st.pyplot(fig)
+                                plt.close()
+                            
+                            # 選択を保存
+                            if st.button(f"この解を採用", key=f"adopt_{pair_key}_{selected_pair_idx}"):
+                                st.session_state.step2_selected_idx = selected_pair_idx
+                                st.session_state.optimized_dsm = selected_pair['matrix']
+                                st.session_state.step2_package = pkg
+                                st.success(f"✅ {obj1_label} vs {obj2_label} の解{selected_pair_idx}を採用しました")
     
     # 8.4 STEP-3: パーティショニングとモジュール化
     if "step2_selected_idx" in st.session_state and "optimized_dsm" in st.session_state:
@@ -4076,6 +4654,16 @@ def tab9_advanced_analytics():
     col_settings_fi, col_execute_fi = st.columns([2, 1])
     
     with col_settings_fi:
+        fisher_mode = st.radio(
+            "計算モード",
+            options=["基本モード", "正規化モード"],
+            index=0,
+            help="""
+            - **基本モード**: エッジの実際のスコアをそのまま使用（理論的に正しい、推奨）
+            - **正規化モード**: スコアを0-1に正規化して相対的な差を強調（視覚的に分かりやすい）
+            """
+        )
+        
         noise_variance_fi = st.slider(
             "ノイズ分散（σ²）",
             min_value=0.1,
@@ -4112,10 +4700,14 @@ def tab9_advanced_analytics():
                 tracker_fi.progress_text.text(message)
                 tracker_fi.progress_bar.progress(pct)
             
+            # モードを変換
+            mode = "normalized" if fisher_mode == "正規化モード" else "basic"
+            
             analyzer_fi = FisherInformationAnalyzer(
                 adjacency_matrix=st.session_state.adjacency_matrix,
                 node_names=nodes,
-                noise_variance=noise_variance_fi
+                noise_variance=noise_variance_fi,
+                mode=mode
             )
             
             result_fi = analyzer_fi.compute_fisher_information(progress_callback=progress_callback_fi)
@@ -4129,6 +4721,7 @@ def tab9_advanced_analytics():
                 "result": result_fi,
                 "timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "parameters": {
+                    "mode": fisher_mode,
                     "noise_variance": noise_variance_fi,
                     "top_k": top_k_fi
                 }

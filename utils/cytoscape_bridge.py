@@ -29,7 +29,8 @@ class CytoscapeConverter:
         adjacency_matrix: np.ndarray,
         categories: List[str],
         idef0_data: Dict[str, Dict[str, Any]],
-        use_hierarchical_layout: bool = False
+        use_hierarchical_layout: bool = False,
+        network_metrics: Optional[Dict[str, Dict[str, float]]] = None
     ) -> Dict[str, Any]:
         """
         メイン変換関数
@@ -46,6 +47,8 @@ class CytoscapeConverter:
             IDEF0データ（カテゴリごとのInput/Mechanism/Output）
         use_hierarchical_layout : bool
             階層的レイアウト用の座標を計算するか（デフォルト: False）
+        network_metrics : Optional[Dict[str, Dict[str, float]]]
+            ネットワーク分析メトリクス（ノード名 → {pagerank, betweenness, ...}）
         
         Returns
         -------
@@ -81,6 +84,14 @@ class CytoscapeConverter:
                     "level": info.get("level", 1),
                     "category": info.get("category", "")
                 }
+                
+                # ネットワークメトリクスを追加
+                if network_metrics and node_name in network_metrics:
+                    metrics = network_metrics[node_name]
+                    node_data["pagerank"] = metrics.get("pagerank", 0)
+                    node_data["betweenness"] = metrics.get("betweenness", 0)
+                    node_data["in_degree"] = metrics.get("in_degree", 0)
+                    node_data["out_degree"] = metrics.get("out_degree", 0)
                 
                 # 位置情報を追加（階層的レイアウト時のみ）
                 node_obj = {"data": node_data}
@@ -279,7 +290,8 @@ def convert_pim_to_cytoscape(
     categories: List[str],
     idef0_data: Dict[str, Dict[str, Any]],
     threshold: float = 2.0,
-    use_hierarchical_layout: bool = False
+    use_hierarchical_layout: bool = False,
+    network_metrics: Optional[Dict[str, Dict[str, float]]] = None
 ) -> Dict[str, Any]:
     """
     便利関数: PIMデータをCytoscape形式に変換
@@ -298,6 +310,8 @@ def convert_pim_to_cytoscape(
         エッジ表示の閾値
     use_hierarchical_layout : bool
         階層的レイアウト用の座標を計算するか
+    network_metrics : Optional[Dict[str, Dict[str, float]]]
+        ネットワーク分析メトリクス（ノード名 → {pagerank, betweenness, ...}）
     
     Returns
     -------
@@ -307,5 +321,6 @@ def convert_pim_to_cytoscape(
     converter = CytoscapeConverter(threshold=threshold)
     return converter.convert(
         nodes, adjacency_matrix, categories, idef0_data,
-        use_hierarchical_layout=use_hierarchical_layout
+        use_hierarchical_layout=use_hierarchical_layout,
+        network_metrics=network_metrics
     )
