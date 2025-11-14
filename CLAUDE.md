@@ -28,8 +28,9 @@
 - **最適化:** NSGA-II（多目的遺伝的アルゴリズム）
 
 ### フロントエンド（カスタムStreamlitコンポーネント）
-- **3D可視化:** NetworkMaps (Three.js)
+- **3D可視化:** NetworkMaps (Three.js), **VAS System 3D Viewer** (Three.js) ⭐ NEW
 - **2D可視化:** Cytoscape.js
+- **OPMモデリング:** Plotly.js
 - **開発言語:** React, TypeScript
 - **ビルドツール:** Webpack
 
@@ -44,7 +45,7 @@
 3. **ステップ3: ノード定義** - IDEF0形式（AI主導対話 / 多様性生成 / **Zigzagging粒度調整**）
 4. **ステップ4: ノード影響評価** - Zigzagging手法による-9～+9スケール評価
 5. **ステップ5: 行列分析** - 隣接行列生成とヒートマップ可視化
-6. **ステップ6: ネットワーク可視化** - 3D/2D可視化
+6. **ステップ6: ネットワーク可視化** - 3D/2D可視化（**4つのタブ**: NetworkMaps, Cytoscape, OPM, **VAS 3D Viewer** ⭐ NEW）
 7. **ステップ7: ネットワーク分析** - PageRank、中心性指標
 8. **ステップ8: DSM最適化** - NSGA-IIによる多目的最適化 + **パーティショニング**
 9. **ステップ9: 高度な分析** - 博士課程レベルの7つの分析手法（Shapley Value, Transfer Entropy, etc.）
@@ -70,6 +71,8 @@ pim/
 ├── utils/
 │   ├── networkmaps_bridge.py      # PIM → NetworkMaps変換
 │   ├── cytoscape_bridge.py        # PIM → Cytoscape変換
+│   ├── opm_bridge.py              # PIM → OPM変換
+│   ├── vas_bridge.py              # PIM → VAS変換（基本＋コミュニティ） ⭐ NEW
 │   ├── idef0_classifier.py        # IDEF0ノード分類とZigzaggingペア生成
 │   ├── evaluation_filter.py       # 論理ルールベース評価フィルタリング
 │   ├── dsm_optimizer.py           # DSM最適化（NSGA-II）
@@ -87,10 +90,18 @@ pim/
 │   │   ├── __init__.py
 │   │   ├── component.py
 │   │   └── frontend/              # React/TypeScript
-│   └── cytoscape_viewer/          # 2D可視化コンポーネント
+│   ├── cytoscape_viewer/          # 2D可視化コンポーネント
+│   │   ├── __init__.py
+│   │   ├── component.py
+│   │   └── frontend/              # React/TypeScript
+│   ├── opm_viewer/                # OPMモデリングコンポーネント
+│   │   ├── __init__.py
+│   │   ├── component.py
+│   │   └── frontend/              # React/TypeScript + Plotly.js
+│   └── vas_viewer/                # VAS System 3D Viewerコンポーネント ⭐ NEW
 │       ├── __init__.py
 │       ├── component.py
-│       └── frontend/              # React/TypeScript
+│       └── frontend/              # React/TypeScript + Three.js
 ├── step3.md, step4.md, ...        # 各ステップの実装仕様書
 ├── CLAUDE.md                      # このファイル
 ├── ROADMAP.md                     # 開発ロードマップ
@@ -1147,6 +1158,113 @@ plt.rcParams['axes.unicode_minus'] = False
 | タブ7（PageRank） | PageRank高、Betweenness高 | 重要・ボトルネック → 細分化の価値 | ✅ 実装済み |
 | タブ8（DSM） | 調整難易度・コンフリクト度高 | 設計困難 → 粒度調整が必要 | ⚡ 将来実装 |
 
+## VAS System 3D Viewer統合（2025-11-14実装） ⭐ NEW
+
+### 概要
+
+3DFAILURE-mainのVAS System 3D ViewerをPIMシステムに完全統合しました。
+**2箇所**での活用を実現：
+1. **ステップ6**: 基本ネットワーク可視化（4番目のタブ）
+2. **ステップ9.6**: コミュニティ検出結果の可視化（選択式）
+
+### 実装内容
+
+**Phase 1: データ変換レイヤー**
+- `utils/vas_bridge.py` (350行)
+  - `convert_pim_to_vas()`: 基本PIM→VAS変換
+  - `convert_community_to_vas()`: Community Detection→VAS変換
+  - IDEF0タイプマッピング（Output→System, Mechanism→Process, Input→Component）
+
+**Phase 2: Streamlitコンポーネント**
+- `components/vas_viewer/` (1200行)
+  - React + TypeScript + Three.js
+  - `VASViewer.tsx`: メイン3D可視化コンポーネント
+  - 検索、フィルタ、レベル選択機能
+  - OrbitControls（回転・ズーム・パン）
+
+**Phase 3: ステップ6統合**
+- タブ定義を4つに変更：[NetworkMaps] [Cytoscape] [OPM] [🔍 VAS 3D Viewer] ← NEW
+- 左パネル：検索、フィルタ（Output/Mechanism/Input）、レベル選択
+- 右パネル：Three.js 3D可視化 + 詳細情報
+
+**Phase 4: ステップ9.6統合**
+- 可視化タイプ選択：📊 2D散布図（matplotlib） / 🔍 VAS 3D Viewer
+- コミュニティ別レイヤー配置（Z軸方向）
+- コミュニティ内/間エッジの区別
+
+### 使用方法
+
+**ステップ6での使用:**
+1. ステップ1-5を完了（プロセス定義 → 隣接行列生成）
+2. ステップ6「ネットワーク可視化」を開く
+3. [🔍 VAS 3D Viewer] タブをクリック
+4. 左パネルで設定調整（エッジ閾値、カメラモード等）
+5. 右パネルで3D可視化を確認
+
+**操作方法:**
+- 🖱️ 左ドラッグ: 回転
+- 🖱️ ホイール: ズーム
+- 🖱️ 右ドラッグ: パン
+- 🔍 検索: ノード名でフィルタ
+- 📊 フィルタ: タイプ別（System/Process/Component）、レベル別（0-2）
+
+**ステップ9.6での使用:**
+1. ステップ9.6でGraph Embedding分析を実行
+2. 可視化タイプで「🔍 VAS 3D Viewer（コミュニティ別レイヤー）」を選択
+3. 各コミュニティが異なるZ軸レイヤーに配置された3D可視化を確認
+
+### データマッピング
+
+**ステップ6（基本可視化）:**
+- Output → System (level=0, 緑色、Z=0)
+- Mechanism → Process (level=1, 青色、Z=1)
+- Input → Component (level=2, 橙色、Z=2)
+- 正スコア → Information/Energy（青系、太さ=スコア）
+- 負スコア → Constraint/Risk（赤系、太さ=|スコア|）
+
+**ステップ9.6（コミュニティ可視化）:**
+- 各コミュニティが異なるZ軸レイヤーに配置
+- 同一コミュニティエッジ: IntraCommunity（太線）
+- 異なるコミュニティエッジ: InterCommunity（細線）
+
+### 技術スタック
+
+- **バックエンド:** Python（データ変換）
+- **フロントエンド:** React + TypeScript
+- **3D描画:** Three.js v0.159
+- **ビルド:** Webpack 5
+- **統合:** Streamlit Custom Component API
+
+### パフォーマンス
+
+- bundle.js: 971 KB（Three.js含む）
+- 初回ロード: 1-2秒
+- 推奨ノード数: 50以下（快適）、100以下（動作可能）
+
+### トラブルシューティング
+
+**可視化が表示されない場合:**
+1. `NETWORKMAPS_RELEASE=true`環境変数が設定されているか確認
+2. フロントエンドがビルド済みか確認（`components/vas_viewer/frontend/build/bundle.js`が存在）
+3. ステップ5で隣接行列が生成済みか確認
+
+**再ビルド方法:**
+```bash
+cd components/vas_viewer/frontend
+npm run build
+```
+
+### 詳細ドキュメント
+
+詳細は `VAS_VIEWER_INTEGRATION.md` を参照してください。
+
+**総実装:**
+- 総追加行数: 約1760行
+- 新規ファイル: 11ファイル
+- 実装時間: 約3-4時間
+
+---
+
 ## 参考資料
 
 - ステップ実装仕様: `step3.md`, `step4.md`, `step5.md`, `step6.md`, `step7.md`
@@ -1155,4 +1273,6 @@ plt.rcParams['axes.unicode_minus'] = False
 - Streamlitドキュメント: https://docs.streamlit.io/
 - NetworkMaps: 既存実装（NetworkMaps/pim統合プロジェクト）
 - Cytoscape.js: https://js.cytoscape.org/
+- Three.js: https://threejs.org/
+- VAS System 3D Viewer: 3DFAILURE-main統合
 - 公理的設計: Suh (2001) - Zigzagging手法の原典

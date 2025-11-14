@@ -55,6 +55,7 @@ temp/
 cache/
 debug_logs/
 app.py.backup
+3DFAILURE-main/
 
 # Frontend build artifacts
 components/*/frontend/node_modules/

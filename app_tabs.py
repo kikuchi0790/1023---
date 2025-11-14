@@ -1532,7 +1532,7 @@ def tab6_network_visualization():
     else:
         st.success("✅ ステップ5で生成された隣接行列を使用しています。")
     
-    viz_tab1, viz_tab2, viz_tab3 = st.tabs(["🎮 3D可視化 (NetworkMaps)", "📊 2D可視化 (Cytoscape)", "🏗️ OPMモデリング"])
+    viz_tab1, viz_tab2, viz_tab3, viz_tab4 = st.tabs(["🎮 3D可視化 (NetworkMaps)", "📊 2D可視化 (Cytoscape)", "🏗️ OPMモデリング", "🔍 VAS 3D Viewer"])
     
     with viz_tab1:
         st.info("💡 3D空間でノード間の関係性を可視化します（要: 隣接行列データ）")
@@ -1862,6 +1862,91 @@ def tab6_network_visualization():
                         st.markdown("**ノード数:**", len(nodes) if nodes else 0)
                         st.markdown("**カテゴリ数:**", len(SessionManager.get_functional_categories()))
                         st.markdown("**隣接行列形状:**", str(st.session_state.adjacency_matrix.shape) if st.session_state.adjacency_matrix is not None else "None")
+    
+    with viz_tab4:
+        st.info("💡 VAS System 3D Viewerで高度な3D可視化を実現します（検索・フィルタ機能付き）")
+        
+        if st.session_state.adjacency_matrix is not None:
+            from utils.vas_bridge import convert_pim_to_vas
+            from components.vas_viewer import vas_viewer
+            
+            try:
+                col_controls_vas, col_viewer_vas = st.columns([1, 3])
+                
+                with col_controls_vas:
+                    st.subheader("VAS表示設定")
+                    
+                    score_threshold_vas = st.slider(
+                        "エッジ表示閾値",
+                        min_value=0.0,
+                        max_value=5.0,
+                        value=0.5,
+                        step=0.5,
+                        help="この値以上の影響スコアを持つエッジのみ表示"
+                    )
+                    
+                    camera_mode_vas = st.radio(
+                        "カメラモード",
+                        options=["3d", "2d"],
+                        format_func=lambda x: "3D視点（自由回転）" if x == "3d" else "2D俯瞰（固定）",
+                        help="視点モードを選択",
+                        key="vas_camera_mode"
+                    )
+                    
+                    enable_search_vas = st.checkbox("ノード検索を有効化", value=True, key="vas_enable_search")
+                    enable_filters_vas = st.checkbox("タイプ・レベルフィルタ", value=True, key="vas_enable_filters")
+                    show_level_control_vas = st.checkbox("レベル選択表示", value=True, key="vas_show_level")
+                    
+                    st.divider()
+                    st.caption("💡 操作方法")
+                    st.markdown("""
+                    **3D操作:**
+                    - 🖱️ 左ドラッグ: 回転
+                    - 🖱️ ホイール: ズーム
+                    - 🖱️ 右ドラッグ: パン
+                    
+                    **左パネル:**
+                    - 🔍 検索: ノード名で検索
+                    - 📊 フィルタ: タイプ別表示
+                    - 📈 レベル: 階層別表示
+                    """)
+                    
+                    st.divider()
+                    st.caption("📊 データ情報")
+                    st.markdown(f"**ノード数:** {len(nodes)}")
+                    st.markdown(f"**カテゴリ数:** {len(SessionManager.get_functional_categories())}")
+                
+                with col_viewer_vas:
+                    # PIM → VAS変換
+                    vas_data = convert_pim_to_vas(
+                        nodes=nodes,
+                        adjacency_matrix=st.session_state.adjacency_matrix,
+                        categories=SessionManager.get_functional_categories(),
+                        idef0_data=SessionManager.get_all_idef0_nodes(),
+                        score_threshold=score_threshold_vas
+                    )
+                    
+                    # VAS 3D Viewer表示
+                    vas_viewer(
+                        vas_data=vas_data,
+                        height=700,
+                        camera_mode=camera_mode_vas,
+                        enable_search=enable_search_vas,
+                        enable_filters=enable_filters_vas,
+                        show_level_control=show_level_control_vas,
+                        score_threshold=score_threshold_vas,
+                        key="pim_vas_viewer"
+                    )
+                    
+                    st.success(f"✅ VAS 3D Viewer表示完了: {len(vas_data['nodes'])}ノード, {len(vas_data['links'])}リンク")
+                    
+            except Exception as e:
+                st.error(f"❌ VAS可視化エラー: {str(e)}")
+                with st.expander("🔍 エラー詳細"):
+                    import traceback
+                    st.code(traceback.format_exc(), language="python")
+        else:
+            st.warning("⚠️ 先にタブ5で隣接行列を生成してください")
 
 
 def tab7_network_analysis():
@@ -4547,36 +4632,106 @@ def tab9_advanced_analytics():
         col3.metric("埋め込み次元", result_ge.embedding_dim)
         col4.metric("計算時間", f"{result_ge.computation_time:.1f}秒")
         
-        # 3. 2D散布図（コミュニティ別色分け）
-        st.markdown("#### 2D可視化（コミュニティ別）")
+        # 3. 2D散布図（コミュニティ別色分け） or VAS 3D Viewer
+        st.markdown("#### 2D/3D可視化（コミュニティ別）")
         
-        import matplotlib.pyplot as plt
-        import matplotlib.colors as mcolors
-        # 日本語フォント設定
-        plt.rcParams['font.sans-serif'] = ['Hiragino Sans', 'Yu Gothic', 'Meiryo', 'DejaVu Sans']
-        plt.rcParams['axes.unicode_minus'] = False
+        viz_type_ge = st.radio(
+            "可視化タイプ",
+            options=["matplotlib", "vas"],
+            format_func=lambda x: "📊 2D散布図（matplotlib）" if x == "matplotlib" else "🔍 VAS 3D Viewer（コミュニティ別レイヤー）",
+            horizontal=True,
+            help="コミュニティ構造を可視化する方法を選択",
+            key="ge_viz_type"
+        )
         
-        fig, ax = plt.subplots(figsize=(12, 8))
-        
-        # コミュニティごとに色を割り当て
-        unique_communities = sorted(set(result_ge.communities.values()))
-        colors = plt.cm.tab20(np.linspace(0, 1, len(unique_communities)))
-        community_colors = {comm_id: colors[i] for i, comm_id in enumerate(unique_communities)}
-        
-        # プロット
-        for node in nodes:
-            x, y = result_ge.node_positions_2d[node]
-            comm_id = result_ge.communities[node]
-            ax.scatter(x, y, c=[community_colors[comm_id]], s=200, alpha=0.7, edgecolors='black', linewidths=1.5)
-            ax.annotate(node, (x, y), fontsize=9, ha='center', va='center')
-        
-        ax.set_xlabel("次元1", fontsize=12)
-        ax.set_ylabel("次元2", fontsize=12)
-        ax.set_title(f"Graph Embedding 2D可視化（{result_ge.n_communities}コミュニティ）", fontsize=14)
-        ax.grid(True, alpha=0.3)
-        
-        st.pyplot(fig)
-        plt.close()
+        if viz_type_ge == "matplotlib":
+            # 既存のmatplotlib 2D散布図
+            import matplotlib.pyplot as plt
+            import matplotlib.colors as mcolors
+            # 日本語フォント設定
+            plt.rcParams['font.sans-serif'] = ['Hiragino Sans', 'Yu Gothic', 'Meiryo', 'DejaVu Sans']
+            plt.rcParams['axes.unicode_minus'] = False
+            
+            fig, ax = plt.subplots(figsize=(12, 8))
+            
+            # コミュニティごとに色を割り当て
+            unique_communities = sorted(set(result_ge.communities.values()))
+            colors = plt.cm.tab20(np.linspace(0, 1, len(unique_communities)))
+            community_colors = {comm_id: colors[i] for i, comm_id in enumerate(unique_communities)}
+            
+            # プロット
+            for node in nodes:
+                x, y = result_ge.node_positions_2d[node]
+                comm_id = result_ge.communities[node]
+                ax.scatter(x, y, c=[community_colors[comm_id]], s=200, alpha=0.7, edgecolors='black', linewidths=1.5)
+                ax.annotate(node, (x, y), fontsize=9, ha='center', va='center')
+            
+            ax.set_xlabel("次元1", fontsize=12)
+            ax.set_ylabel("次元2", fontsize=12)
+            ax.set_title(f"Graph Embedding 2D可視化（{result_ge.n_communities}コミュニティ）", fontsize=14)
+            ax.grid(True, alpha=0.3)
+            
+            st.pyplot(fig)
+            plt.close()
+        else:
+            # VAS 3D Viewer（コミュニティ別レイヤー）
+            try:
+                from utils.vas_bridge import convert_community_to_vas
+                from components.vas_viewer import vas_viewer
+                
+                col_vas_controls, col_vas_viewer = st.columns([1, 3])
+                
+                with col_vas_controls:
+                    score_threshold_ge_vas = st.slider(
+                        "エッジ閾値",
+                        min_value=0.0,
+                        max_value=5.0,
+                        value=0.5,
+                        step=0.5,
+                        key="ge_vas_threshold"
+                    )
+                    
+                    camera_mode_ge_vas = st.radio(
+                        "カメラ",
+                        options=["3d", "2d"],
+                        format_func=lambda x: "3D" if x == "3d" else "2D",
+                        key="ge_vas_camera"
+                    )
+                    
+                    st.caption("💡 コミュニティごとにレイヤー（Z軸）に配置されます")
+                
+                with col_vas_viewer:
+                    # Community → VAS変換
+                    vas_community_data = convert_community_to_vas(
+                        nodes=nodes,
+                        adjacency_matrix=st.session_state.adjacency_matrix,
+                        communities=result_ge.communities,
+                        community_labels=result_ge.community_labels,
+                        node_positions_2d=result_ge.node_positions_2d,
+                        categories=SessionManager.get_functional_categories(),
+                        idef0_data=SessionManager.get_all_idef0_nodes(),
+                        score_threshold=score_threshold_ge_vas
+                    )
+                    
+                    # VAS Viewer表示
+                    vas_viewer(
+                        vas_data=vas_community_data,
+                        height=700,
+                        camera_mode=camera_mode_ge_vas,
+                        enable_search=True,
+                        enable_filters=True,
+                        show_level_control=True,
+                        score_threshold=score_threshold_ge_vas,
+                        key="ge_vas_viewer"
+                    )
+                    
+                    st.success(f"✅ VAS 3D Viewer表示: {len(vas_community_data['nodes'])}ノード, {len(vas_community_data['links'])}リンク")
+                    
+            except Exception as e:
+                st.error(f"❌ VAS可視化エラー: {str(e)}")
+                with st.expander("🔍 エラー詳細"):
+                    import traceback
+                    st.code(traceback.format_exc(), language="python")
         
         # 4. コミュニティ詳細
         st.markdown("#### コミュニティ詳細")
